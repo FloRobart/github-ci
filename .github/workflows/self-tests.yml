@@ -1,0 +1,98 @@
+name: Self-tests
+
+# CI of this repository itself, run on its own pull requests and on main.
+#
+#   Script tests  gitflow/tests/run-tests.sh, on throwaway git repositories
+#   Lint          shellcheck on the gitflow scripts, actionlint on every workflow
+#
+# Unlike the other workflows of this folder, this one is not reusable (no
+# "workflow_call"): the projects that import Github-ci never run it.
+#
+# Everything is tested from the checked out code, never through "@main": a pull
+# request must be tested with its own changes, not with what is already published.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push on a pull request replaces its previous run.
+concurrency:
+  group: self-tests-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  #==============#
+  # Script tests #
+  #==============#
+
+  script-tests:
+    name: Script tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run the gitflow script tests
+        run: gitflow/tests/run-tests.sh
+
+  #======#
+  # Lint #
+  #======#
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # Pinned versions, checked against the checksums published with each release,
+    # so the lint never changes on its own between two runs.
+    env:
+      SHELLCHECK_VERSION: '0.11.0'
+      SHELLCHECK_SHA256: b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6
+      ACTIONLINT_VERSION: '1.7.12'
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Added in front of the PATH: actionlint also finds this shellcheck, and checks
+      # the "run:" scripts of the workflows with it.
+      - name: Install shellcheck and actionlint
+        run: |
+          tools_directory="${RUNNER_TEMP}/lint-tools"
+          mkdir -p "${tools_directory}"
+          cd "${tools_directory}"
+
+          shellcheck_archive="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
+          curl --fail --silent --show-error --location --remote-name \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/${shellcheck_archive}"
+          echo "${SHELLCHECK_SHA256}  ${shellcheck_archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "${shellcheck_archive}" --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+
+          actionlint_archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --remote-name \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${actionlint_archive}"
+          echo "${ACTIONLINT_SHA256}  ${actionlint_archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "${actionlint_archive}" actionlint
+
+          echo "${tools_directory}" >> "${GITHUB_PATH}"
+
+      # "SCRIPTDIR" lets shellcheck follow "source .../common.sh" next to each script.
+      - name: Lint the gitflow scripts (shellcheck)
+        run: shellcheck --external-sources --source-path=SCRIPTDIR gitflow/scripts/*.sh gitflow/tests/*.sh
+
+      # The examples are linted too: they are the files the projects copy.
+      - name: Lint the workflows (actionlint)
+        if: ${{ !cancelled() }}
+        run: actionlint .github/workflows/*.yml ./*/example/ci.yml

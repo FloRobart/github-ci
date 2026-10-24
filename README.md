@@ -61,7 +61,8 @@ Les détails (règles, calcul de version, réglages du dépôt) sont dans [gitfl
 ├── gitflow-publish-release.yml  ┘
 ├── nodejs.yml                   → appartient à nodejs/
 ├── astro.yml                    → appartient à astro/
-└── flutter.yml                  → appartient à flutter/
+├── flutter.yml                  → appartient à flutter/
+└── self-tests.yml               → CI de ce dépôt, jamais appelée par les projets
 gitflow/
 ├── scripts/                La logique du git flow, en bash, testable en local
 ├── tests/                  Tests des scripts
@@ -86,6 +87,20 @@ gitflow/tests/run-tests.sh
 ```
 
 Les tests créent des dépôts git jetables et vérifient le calcul de version, les règles de branches, les messages de commit et le plan de release. Ils n'ont besoin ni de réseau ni de GitHub.
+
+Lint, avec [shellcheck](https://github.com/koalaman/shellcheck) et [actionlint](https://github.com/rhysd/actionlint) installés :
+
+```bash
+shellcheck --external-sources --source-path=SCRIPTDIR gitflow/scripts/*.sh gitflow/tests/*.sh
+```
+
+```bash
+actionlint .github/workflows/*.yml ./*/example/ci.yml
+```
+
+[self-tests.yml](.github/workflows/self-tests.yml) lance ces trois contrôles sur chaque pull request de ce dépôt et sur `main`. Il n'a pas de `workflow_call` : les projets qui importent Github-ci ne le lancent jamais. Il teste le code de la pull request elle-même, jamais la version `@main`.
+
+Ne sont pas couverts : l'enchaînement réel des workflows réutilisables appelés par un projet, et les scripts qui écrivent sur GitHub (`create-branch.sh`, `open-pull-request.sh`, `create-github-release.sh`). Seul un vrai projet de test les vérifie.
 
 ## Séparer en plusieurs dépôts plus tard
 

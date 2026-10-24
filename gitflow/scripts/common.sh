@@ -2,6 +2,9 @@
 #
 # Helpers shared by the gitflow scripts. This file is sourced, never executed.
 
+# The patterns below are used by the scripts that source this file, not by this file:
+# shellcheck disable=SC2034
+
 #==========#
 # Patterns #
 #==========#

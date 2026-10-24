@@ -14,7 +14,9 @@
 
 set -o errexit -o nounset -o pipefail
 
-readonly SCRIPTS_DIRECTORY="$(cd "$(dirname "$0")" && pwd)"
+SCRIPTS_DIRECTORY="$(cd "$(dirname "$0")" && pwd)"
+readonly SCRIPTS_DIRECTORY
+
 source "${SCRIPTS_DIRECTORY}/common.sh"
 
 readonly FIRST_VERSION='0.1.0'

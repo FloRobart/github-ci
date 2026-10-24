@@ -7,8 +7,11 @@
 
 set -o errexit -o nounset -o pipefail
 
-readonly SCRIPTS_DIRECTORY="$(cd "$(dirname "$0")/../scripts" && pwd)"
-readonly WORKING_DIRECTORY="$(mktemp -d)"
+SCRIPTS_DIRECTORY="$(cd "$(dirname "$0")/../scripts" && pwd)"
+readonly SCRIPTS_DIRECTORY
+
+WORKING_DIRECTORY="$(mktemp -d)"
+readonly WORKING_DIRECTORY
 trap 'rm -rf "${WORKING_DIRECTORY}"' EXIT
 
 export PATH="${SCRIPTS_DIRECTORY}:${PATH}"

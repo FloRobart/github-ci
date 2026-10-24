@@ -172,8 +172,12 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           # Credentials of both registries, kept out of the project and its .npmrc.
+          # The tokens are written as "${...}" on purpose, inside single quotes: npm reads
+          # them from the environment, so their values never land in the file.
           export NPM_CONFIG_USERCONFIG="${RUNNER_TEMP}/publish.npmrc"
+          # shellcheck disable=SC2016
           echo '//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}' > "${NPM_CONFIG_USERCONFIG}"
+          # shellcheck disable=SC2016
           if [ -n "${NPM_TOKEN}" ]; then
             echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> "${NPM_CONFIG_USERCONFIG}"
           fi
