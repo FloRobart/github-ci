@@ -1,0 +1,36 @@
+---
+name: Release candidate
+
+# Button of the Actions tab: publishes a test version (x.y.z-rc.N) of a release
+# or hotfix branch. Start it with the release/x.y.z or hotfix/x.y.z branch
+# selected in the "Use workflow from" menu.
+#
+# The archives are attached to a GitHub pre-release, to be loaded by hand in a
+# browser. A candidate is never sent to the stores.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    name: Candidate
+    uses: FloRobart/Github-ci/.github/workflows/release-candidate.yml@v1
+    with:
+      project-type: extension
+      extension-manifest-path: public/manifest.json
+      automation-app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+  package:
+    name: Package
+    needs: candidate
+    permissions:
+      contents: write
+    uses: FloRobart/Github-ci/.github/workflows/extension-build.yml@v1
+    with:
+      version: ${{ needs.candidate.outputs.version }}
+      release-tag: ${{ needs.candidate.outputs.tag }}

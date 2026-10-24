@@ -1,0 +1,17 @@
+name: Gitflow scripts
+description: >-
+  Adds the gitflow scripts to the PATH, so the next steps of the job can call them
+  by name (for example "compute-next-version.sh"). No checkout of this repository is needed.
+
+runs:
+  using: composite
+
+  steps:
+    - name: Add the gitflow scripts to the PATH
+      shell: bash
+      env:
+        SCRIPTS_DIRECTORY: ${{ github.action_path }}
+      run: |
+        # The executable bit can be lost on the way (zip download, Windows checkout).
+        chmod +x "${SCRIPTS_DIRECTORY}"/*.sh
+        echo "${SCRIPTS_DIRECTORY}" >> "${GITHUB_PATH}"

@@ -1,0 +1,92 @@
+---
+name: Flutter quality
+
+# Reusable workflow: installs a Flutter project and runs its static analysis
+# and its tests. Each command can be replaced, or skipped by passing an empty
+# string.
+
+on:
+  workflow_call:
+    inputs:
+      flutter-channel:
+        description: Flutter release channel.
+        type: string
+        default: stable
+      flutter-version:
+        description: Flutter version to install. Empty installs the latest version of the channel.
+        type: string
+        default: ''
+      working-directory:
+        description: Directory of the project, relative to the root of the repository.
+        type: string
+        default: .
+      code-generation-command:
+        description: Command that generates code before the checks, for example "dart run build_runner build". Empty skips it.
+        type: string
+        default: ''
+      analyze-command:
+        description: Command that runs the static analysis. Empty skips it.
+        type: string
+        default: flutter analyze
+      test-command:
+        description: Command that runs the tests. Empty skips them, which a project without "test" directory needs.
+        type: string
+        default: flutter test
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter-channel }}
+          flutter-version: ${{ inputs.flutter-version }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        if: ${{ inputs.code-generation-command != '' }}
+        run: ${{ inputs.code-generation-command }}
+
+      - name: Analyze
+        if: ${{ inputs.analyze-command != '' }}
+        run: ${{ inputs.analyze-command }}
+
+      - name: Test
+        if: ${{ inputs.test-command != '' }}
+        run: ${{ inputs.test-command }}
+
+      - name: Report success
+        run: |
+          title="✅ Vérifications Flutter réussies"
+
+          echo "::notice title=${title}::Installation, analyse et tests configurés pour ce projet : tout est passé."
+          printf '### %s\n\nInstallation, analyse et tests configurés pour ce projet : tout est passé.\n' "${title}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Report failure
+        if: ${{ failure() }}
+        run: |
+          title="❌ Vérifications Flutter en échec"
+          message="L'étape marquée d'une croix rouge ci-dessus (Install dependencies, Generate code, Analyze ou Test) contient le détail de l'erreur. Corrigez puis poussez un nouveau commit : les vérifications se relancent toutes seules."
+
+          echo "::error title=${title}::${message}"
+          printf '### %s\n\n%s\n' "${title}" "${message}" >> "${GITHUB_STEP_SUMMARY}"

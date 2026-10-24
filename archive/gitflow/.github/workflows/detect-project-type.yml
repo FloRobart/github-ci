@@ -1,0 +1,51 @@
+name: Detect project type
+
+# Reusable workflow: tells whether the repository holds a Node.js or a Flutter
+# project, so the other steps know how to test it and where its version lives.
+
+on:
+  workflow_call:
+    outputs:
+      project-type:
+        description: Either "nodejs" or "flutter".
+        value: ${{ jobs.detect.outputs.project-type }}
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect
+    runs-on: ubuntu-latest
+
+    outputs:
+      project-type: ${{ steps.detection.outputs.project-type }}
+
+    steps:
+      # Only the two files that identify a project are needed, not the whole repository.
+      - name: Checkout the files that identify a project
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /package.json
+            /pubspec.yaml
+
+      - name: Detect the project type
+        id: detection
+        run: |
+          # A Flutter project may also hold a package.json for its tooling, so pubspec.yaml wins.
+          if [ -f pubspec.yaml ]; then
+            echo "project-type=flutter" >> "${GITHUB_OUTPUT}"
+            echo "::notice title=Type de projet::Flutter (pubspec.yaml trouvé à la racine)."
+            exit 0
+          fi
+
+          if [ -f package.json ]; then
+            echo "project-type=nodejs" >> "${GITHUB_OUTPUT}"
+            echo "::notice title=Type de projet::Node.js (package.json trouvé à la racine)."
+            exit 0
+          fi
+
+          echo "::error title=Type de projet inconnu::Aucun fichier pubspec.yaml (Flutter) ni package.json (Node.js) à la racine du dépôt."
+          exit 1

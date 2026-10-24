@@ -1,0 +1,128 @@
+name: Gitflow Docker image
+
+# Reusable workflow (owner: gitflow/): builds the Docker image of the project once,
+# from the Dockerfile at its root, and pushes it to every configured registry.
+#
+#   ghcr.io/<owner>/<image name>:<image tag>       always
+#   <Docker Hub user>/<image name>:<image tag>     only when DOCKERHUB_USERNAME and DOCKERHUB_TOKEN exist
+#   ... and the same with ":latest" when "tag-latest" is true
+#
+# The version is given to the Dockerfile as the build argument APP_VERSION.
+#
+# Optional secrets, passed with "secrets: inherit": DOCKERHUB_USERNAME and DOCKERHUB_TOKEN.
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: Image name, for example "floraccess" (see gitflow/scripts/to-image-name.sh).
+        type: string
+        required: true
+      image-tag:
+        description: Image tag, for example "1.5.0" or "1.5.0-rc.2".
+        type: string
+        required: true
+      tag-latest:
+        description: Also moves the "latest" tag. Keep it false for release candidates.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      IMAGE_NAME: ${{ inputs.image-name }}
+      IMAGE_TAG: ${{ inputs.image-tag }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_ENABLED: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the Dockerfile
+        run: |
+          if [ ! -f Dockerfile ]; then
+            echo "::error title=Dockerfile manquant::L'image se construit depuis le Dockerfile à la racine du projet, qui n'existe pas. Une application publiée en image Docker doit en avoir un."
+            exit 1
+          fi
+
+      - name: List the image references
+        id: references
+        env:
+          TAG_LATEST: ${{ inputs.tag-latest }}
+        run: |
+          # Registries refuse upper-case letters in image paths.
+          repositories=("ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}")
+          if [ "${DOCKERHUB_ENABLED}" = 'true' ]; then
+            repositories+=("${DOCKERHUB_USERNAME,,}/${IMAGE_NAME}")
+          fi
+
+          image_tags=("${IMAGE_TAG}")
+          if [ "${TAG_LATEST}" = 'true' ]; then
+            image_tags+=('latest')
+          fi
+
+          {
+            echo 'list<<END_OF_REFERENCES'
+            for repository in "${repositories[@]}"; do
+              for image_tag in "${image_tags[@]}"; do
+                echo "${repository}:${image_tag}"
+              done
+            done
+            echo 'END_OF_REFERENCES'
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_ENABLED == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # The image is built once, then pushed under every reference.
+      - name: Build and push the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.references.outputs.list }}
+          build-args: APP_VERSION=${{ inputs.image-tag }}
+          # "source" links the GHCR package to the repository: it shows on the
+          # repository page and inherits its access rights.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ inputs.image-tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report the published image
+        env:
+          IMAGE_REFERENCES: ${{ steps.references.outputs.list }}
+        run: |
+          {
+            echo '### 🐳 Image publiée'
+            echo
+            echo '```text'
+            echo "${IMAGE_REFERENCES}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

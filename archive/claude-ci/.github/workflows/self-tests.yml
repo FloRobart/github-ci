@@ -1,0 +1,38 @@
+---
+name: Self tests
+
+# Tests of this repository itself: the scripts behind the reusable workflows.
+# Unlike the other files of this directory, this workflow is not reusable.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  toolkit:
+    name: Toolkit unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: toolkit
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Run unit tests
+        run: node --test

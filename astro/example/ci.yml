@@ -1,0 +1,21 @@
+# CI of the project: gitflow, quality and releases.
+# Everything lives in FloRobart/Github-ci, see astro/README.md over there.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write       # tags, releases and release branches
+  packages: write       # Docker images on GHCR
+  pull-requests: write  # release and back-merge pull requests
+
+jobs:
+  # Keep the job id "ci": the rulesets expect checks named "ci / ...".
+  ci:
+    uses: FloRobart/Github-ci/.github/workflows/astro.yml@main
+    secrets: inherit

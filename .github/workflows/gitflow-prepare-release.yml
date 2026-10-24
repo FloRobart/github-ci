@@ -1,0 +1,115 @@
+name: Gitflow prepare release
+
+# Reusable workflow (owner: gitflow/): decides what the current run publishes,
+# before anything is built.
+#
+#   Button on dev             →  release candidate vX.Y.Z-rc.1, branch release/vX.Y.Z to create
+#   Button on release/vX.Y.Z  →  next release candidate of that version
+#   Button on hotfix/*        →  next release candidate of the hotfix
+#   Push on main              →  final version vX.Y.Z
+#
+# It also tells the type CI what to build: an application (Docker image, Android…)
+# or a library (npm package…), see gitflow/scripts/detect-project-kind.sh.
+#
+# Nothing is written here: the version is only computed and checked. The release is
+# published by gitflow-publish-release.yml, once every build has succeeded.
+
+on:
+  workflow_call:
+    outputs:
+      kind:
+        description: '"candidate" or "final".'
+        value: ${{ jobs.prepare.outputs.kind }}
+      version:
+        description: Version without the "v" prefix, for example "1.5.0-rc.2" or "1.5.0".
+        value: ${{ jobs.prepare.outputs.version }}
+      tag:
+        description: Git tag of the version, for example "v1.5.0-rc.2" or "v1.5.0".
+        value: ${{ jobs.prepare.outputs.tag }}
+      previous-tag:
+        description: Last final version tag before this one, empty for a first release.
+        value: ${{ jobs.prepare.outputs.previous-tag }}
+      new-release-branch:
+        description: Release branch to create ("release/v1.5.0") when the button was used on dev, empty otherwise.
+        value: ${{ jobs.prepare.outputs.new-release-branch }}
+      project-name:
+        description: Repository name in lower case with hyphens, used for the Docker image and the release files.
+        value: ${{ jobs.prepare.outputs.project-name }}
+      project-kind:
+        description: '"application" (name ending with "-app") or "library" (name ending with "-lib").'
+        value: ${{ jobs.prepare.outputs.project-kind }}
+      has-dockerfile:
+        description: '"true" when the project has a Dockerfile at its root.'
+        value: ${{ jobs.prepare.outputs.has-dockerfile }}
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      kind: ${{ steps.plan.outputs.kind }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      previous-tag: ${{ steps.plan.outputs.previous-tag }}
+      new-release-branch: ${{ steps.plan.outputs.new-release-branch }}
+      project-name: ${{ steps.project-name.outputs.name }}
+      project-kind: ${{ steps.project-kind.outputs.kind }}
+      has-dockerfile: ${{ steps.project-kind.outputs.has-dockerfile }}
+
+    steps:
+      # The whole history, every branch and every tag are needed to compute the version.
+      - name: Checkout the full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load the gitflow scripts
+        uses: FloRobart/Github-ci/gitflow/scripts@main
+
+      - name: Plan the release
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: plan-release.sh >> "${GITHUB_OUTPUT}"
+
+      - name: Compute the project name
+        id: project-name
+        env:
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: |
+          project_name=$(to-image-name.sh "${REPOSITORY_NAME}")
+          echo "name=${project_name}" >> "${GITHUB_OUTPUT}"
+
+      - name: Detect the project kind
+        id: project-kind
+        env:
+          PROJECT_NAME: ${{ steps.project-name.outputs.name }}
+        run: detect-project-kind.sh "${PROJECT_NAME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Report the plan
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          NEW_RELEASE_BRANCH: ${{ steps.plan.outputs.new-release-branch }}
+          PROJECT_NAME: ${{ steps.project-name.outputs.name }}
+          PROJECT_KIND: ${{ steps.project-kind.outputs.kind }}
+        run: |
+          {
+            echo "### 🚀 ${PROJECT_NAME} ${TAG}"
+            echo
+            if [ "${PROJECT_KIND}" = 'library' ]; then
+              echo 'Type : librairie'
+            else
+              echo 'Type : application'
+            fi
+            echo
+            if [ -n "${NEW_RELEASE_BRANCH}" ]; then
+              echo "Branche de release à créer : \`${NEW_RELEASE_BRANCH}\`"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

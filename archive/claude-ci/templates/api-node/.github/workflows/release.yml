@@ -1,0 +1,61 @@
+---
+name: Release
+
+# Runs when a release or hotfix pull request is merged into the production
+# branch: publishes the version (tag and GitHub Release), builds and pushes the
+# Docker image, then brings the version back into the integration branch.
+#
+# Nothing is deployed: putting the new image on the server stays manual.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    uses: FloRobart/Github-ci/.github/workflows/publish-release.yml@v1
+    with:
+      project-type: node
+      automation-app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+  quality:
+    name: Quality
+    needs: release
+    if: ${{ needs.release.outputs.should-publish == 'true' }}
+    uses: FloRobart/Github-ci/.github/workflows/node-quality.yml@v1
+    with:
+      node-version: '24'
+
+  docker-image:
+    name: Docker image
+    needs: [release, quality]
+    permissions:
+      contents: read
+      packages: write
+    uses: FloRobart/Github-ci/.github/workflows/docker-publish.yml@v1
+    with:
+      image-name: my-api # TODO: name of the image, for example "econoris-server"
+      version: ${{ needs.release.outputs.version }}
+      tag-latest: true
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  back-merge:
+    name: Back-merge
+    needs: release
+    if: ${{ needs.release.outputs.should-publish == 'true' }}
+    uses: FloRobart/Github-ci/.github/workflows/back-merge.yml@v1
+    with:
+      released-version: ${{ needs.release.outputs.version }}
+      project-type: node
+      automation-app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}

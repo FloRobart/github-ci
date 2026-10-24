@@ -1,0 +1,223 @@
+name: Node.js
+
+# Reusable workflow (owner: nodejs/): the CI of a Node.js project, gitflow included.
+#
+#   Pull request           →  gitflow checks + quality (lint, format, type check, tests)
+#   Button (Run workflow)  →  quality, then release candidate: Docker image or npm package + GitHub pre-release
+#   Merge on main          →  quality, then final version: Docker image or npm package + GitHub Release
+#
+# What is published depends on the project kind (gitflow/scripts/detect-project-kind.sh):
+#
+#   Application ("-app", with a Dockerfile)  →  Docker image
+#   Library ("-lib", no Dockerfile)          →  npm package, on GitHub Packages and on npmjs.com
+#
+# The quality job is the same for an application and a library: both are installed,
+# linted, format checked, type checked and tested before any release.
+#
+# Only the quality and npm package jobs are specific to Node.js: every gitflow step
+# comes from the gitflow-*.yml workflows. See nodejs/README.md for the project requirements.
+#
+# Optional secret, passed with "secrets: inherit": NPM_TOKEN publishes on npmjs.com
+# when the trusted publishing (OIDC) of the package is not configured.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version used by the quality job.
+        type: string
+        default: '24'
+
+# One run at a time per branch: two clicks on the button, or two merges on main, wait
+# for each other. A pull request only keeps its latest run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  #=========#
+  # Quality #
+  #=========#
+
+  gitflow-checks:
+    name: Gitflow
+    if: github.event_name == 'pull_request'
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-checks.yml@main
+
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      # "npm ci" installs exactly the versions of package-lock.json.
+      - name: Install the dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Only checks: the CI never rewrites the code, the developer runs the formatter.
+      - name: Check the formatting
+        run: npm run format:check
+
+      - name: Check the types
+        run: npm run typecheck
+
+      - name: Run the tests
+        run: npm test
+
+  #=========#
+  # Release #
+  #=========#
+
+  prepare-release:
+    name: Prepare release
+    if: github.event_name != 'pull_request'
+    needs: quality
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-prepare-release.yml@main
+
+  docker-image:
+    name: Docker image
+    if: needs.prepare-release.outputs.project-kind == 'application'
+    needs: prepare-release
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-docker-image.yml@main
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image-name: ${{ needs.prepare-release.outputs.project-name }}
+      image-tag: ${{ needs.prepare-release.outputs.version }}
+      tag-latest: ${{ needs.prepare-release.outputs.kind == 'final' }}
+
+  npm-package:
+    name: npm package
+    if: needs.prepare-release.outputs.project-kind == 'library'
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      packages: write   # GitHub Packages
+      id-token: write   # npm trusted publishing (OIDC): no token to store nor renew
+
+    env:
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+      # A release candidate must never become the version installed by default.
+      DIST_TAG: ${{ needs.prepare-release.outputs.kind == 'final' && 'latest' || 'next' }}
+      # The code of a private repository must not end up on the public registry: when in
+      # doubt (visibility unknown), the package stays off npmjs.com.
+      PUBLISH_ON_NPMJS: ${{ github.event.repository.visibility == 'public' }}
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      # Trusted publishing needs npm 11.5.1 or later, which older Node.js versions lack.
+      - name: Update npm
+        run: npm install --global npm@11
+
+      - name: Install the dependencies
+        run: npm ci
+
+      # Only the copy built by the CI carries the version: package.json is not committed.
+      - name: Set the version
+        run: npm version "${VERSION}" --no-git-tag-version --allow-same-version --ignore-scripts
+
+      - name: Build the library
+        run: npm run build
+
+      # GitHub Packages only accepts a package named after the owner of the repository.
+      - name: Check the package name
+        run: |
+          package_name=$(node --print "require('./package.json').name")
+          expected_scope="@${GITHUB_REPOSITORY_OWNER,,}/"
+
+          if [[ "${package_name}" != "${expected_scope}"* ]]; then
+            echo "::error title=Nom de paquet invalide::Le nom « ${package_name} » de package.json doit commencer par ${expected_scope}, comme l'exige GitHub Packages."
+            exit 1
+          fi
+
+          echo "PACKAGE_NAME=${package_name}" >> "${GITHUB_ENV}"
+
+      # Every registry is skipped when it already has the version, so a failed run can
+      # simply be re-run.
+      - name: Publish the package
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ github.token }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Credentials of both registries, kept out of the project and its .npmrc.
+          export NPM_CONFIG_USERCONFIG="${RUNNER_TEMP}/publish.npmrc"
+          echo '//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}' > "${NPM_CONFIG_USERCONFIG}"
+          if [ -n "${NPM_TOKEN}" ]; then
+            echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> "${NPM_CONFIG_USERCONFIG}"
+          fi
+
+          publish_on_registry() {
+            local registry_url="$1"
+            shift
+            local extra_publish_options=("$@")
+
+            if npm view "${PACKAGE_NAME}@${VERSION}" version --registry "${registry_url}" > /dev/null 2>&1; then
+              echo "::notice title=Version déjà publiée::${PACKAGE_NAME}@${VERSION} existe déjà sur ${registry_url}, elle est conservée."
+              return
+            fi
+
+            npm publish --registry "${registry_url}" --tag "${DIST_TAG}" "${extra_publish_options[@]}"
+            echo "- \`${PACKAGE_NAME}@${VERSION}\` sur ${registry_url} (tag \`${DIST_TAG}\`)" >> "${GITHUB_STEP_SUMMARY}"
+          }
+
+          echo '### 📦 Paquet publié' >> "${GITHUB_STEP_SUMMARY}"
+
+          publish_on_registry 'https://npm.pkg.github.com'
+
+          if [ "${PUBLISH_ON_NPMJS}" != 'true' ]; then
+            echo "::notice title=npmjs.com ignoré::Le dépôt n'est pas public : le paquet n'est publié que sur GitHub Packages."
+            exit 0
+          fi
+
+          # Without "--access public", npmjs.com refuses a scoped package on a free account.
+          publish_on_registry 'https://registry.npmjs.org' --access public
+
+  publish-release:
+    name: Publish release
+    # Only one of the Docker image and the npm package runs: a skipped job is fine,
+    # a failed one stops the release.
+    if: ${{ !failure() && !cancelled() && needs.prepare-release.result == 'success' }}
+    needs: [prepare-release, docker-image, npm-package]
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-publish-release.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      kind: ${{ needs.prepare-release.outputs.kind }}
+      version: ${{ needs.prepare-release.outputs.version }}
+      tag: ${{ needs.prepare-release.outputs.tag }}
+      previous-tag: ${{ needs.prepare-release.outputs.previous-tag }}
+      new-release-branch: ${{ needs.prepare-release.outputs.new-release-branch }}

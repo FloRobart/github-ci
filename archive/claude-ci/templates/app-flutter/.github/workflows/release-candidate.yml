@@ -1,0 +1,45 @@
+---
+name: Release candidate
+
+# Button of the Actions tab: publishes a test version (x.y.z-rc.N) of a release
+# or hotfix branch. Start it with the release/x.y.z or hotfix/x.y.z branch
+# selected in the "Use workflow from" menu.
+#
+# The image is tagged x.y.z-rc.N only: "latest" is never moved by a candidate.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality
+    uses: FloRobart/Github-ci/.github/workflows/flutter-quality.yml@v1
+
+  candidate:
+    name: Candidate
+    needs: quality
+    uses: FloRobart/Github-ci/.github/workflows/release-candidate.yml@v1
+    with:
+      project-type: flutter
+      automation-app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+  web-image:
+    name: Web image
+    needs: candidate
+    permissions:
+      contents: read
+      packages: write
+    uses: FloRobart/Github-ci/.github/workflows/docker-publish.yml@v1
+    with:
+      image-name: my-app-web # TODO: name of the image, for example "econoris-app-web"
+      version: ${{ needs.candidate.outputs.version }}
+      # The Dockerfile copies the whole project before building: no layer can be reused.
+      build-cache: false
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

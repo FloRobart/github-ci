@@ -1,0 +1,96 @@
+---
+name: Publish release
+
+# Reusable workflow: publishes the version found on the production branch as a
+# "vX.Y.Z" tag and a GitHub Release, then deletes the merged release or hotfix
+# branch. Building the artifacts (images, archives) and the back-merge are left
+# to the jobs the caller chains after this one, using the outputs below.
+#
+# The calling workflow is expected to be triggered by a push on the production
+# branch. Nothing is deployed: putting the version on a server stays manual.
+
+on:
+  workflow_call:
+    inputs:
+      project-type:
+        description: 'How the project stores its version: "node", "flutter" or "extension".'
+        type: string
+        required: true
+      extension-manifest-path:
+        description: Path of the manifest.json, for extension projects only.
+        type: string
+        default: public/manifest.json
+      release-name:
+        description: Project name used in the release title. Empty deduces it from the repository name.
+        type: string
+        default: ''
+      automation-app-client-id:
+        description: Client ID of the automation GitHub App.
+        type: string
+        default: ''
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY:
+        description: Private key of the automation GitHub App.
+        required: false
+    outputs:
+      version:
+        description: Version found in the project files, for example "1.4.0".
+        value: ${{ jobs.publish.outputs.version }}
+      tag:
+        description: Tag of that version, for example "v1.4.0".
+        value: ${{ jobs.publish.outputs.tag }}
+      should-publish:
+        description: '"true" when this commit is the published version and its artifacts must be built.'
+        value: ${{ jobs.publish.outputs.should-publish }}
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    concurrency:
+      group: publish-release-${{ github.repository }}
+      cancel-in-progress: false
+
+    outputs:
+      version: ${{ steps.publish.outputs.version }}
+      tag: ${{ steps.publish.outputs.tag }}
+      should-publish: ${{ steps.publish.outputs.should-publish }}
+
+    steps:
+      # The whole history is needed to list the pull requests of the version.
+      - name: Checkout project
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Checked out at the exact commit of this reusable workflow, so the
+      # scripts can never be out of sync with the workflow that runs them.
+      - name: Checkout CI toolkit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-toolkit
+          persist-credentials: false
+
+      - name: Authenticate automation
+        id: automation
+        uses: ./.ci-toolkit/actions/authenticate-automation
+        with:
+          app-client-id: ${{ inputs.automation-app-client-id }}
+          app-private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+      - name: Create tag and GitHub Release
+        id: publish
+        env:
+          GH_TOKEN: ${{ steps.automation.outputs.token }}
+          PROJECT_TYPE: ${{ inputs.project-type }}
+          EXTENSION_MANIFEST_PATH: ${{ inputs.extension-manifest-path }}
+          RELEASE_NAME: ${{ inputs.release-name }}
+        run: node .ci-toolkit/toolkit/commands/publish-release.mjs

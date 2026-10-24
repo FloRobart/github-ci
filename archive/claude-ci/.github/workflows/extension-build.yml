@@ -1,0 +1,156 @@
+---
+name: Extension build
+
+# Reusable workflow: builds a browser extension, lints the result with web-ext
+# and packages it as two archives:
+#   <extension-name>-<version>.zip          the extension, ready for the stores
+#   <extension-name>-<version>-source.zip   readable sources, required by
+#                                           addons.mozilla.org for minified code
+#
+# The archives are kept as a workflow artifact and, when a tag is given,
+# attached to the GitHub Release of that tag. Attaching them requires the
+# calling job to grant "contents: write".
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version used in the archive names, for example "1.4.0" or "1.4.0-rc.2".
+        type: string
+        required: true
+      release-tag:
+        description: Tag of the GitHub Release the archives are attached to. Empty skips it.
+        type: string
+        default: ''
+      extension-name:
+        description: Base name of the archives. Empty uses the repository name.
+        type: string
+        default: ''
+      artifact-name:
+        description: Name of the workflow artifact holding the archives and the build.
+        type: string
+        default: extension
+      node-version:
+        description: Node.js version to install.
+        type: string
+        default: '24'
+      build-command:
+        description: Command that builds the extension.
+        type: string
+        default: npm run build
+      distribution-directory:
+        description: Directory produced by the build.
+        type: string
+        default: dist
+      web-ext-version:
+        description: Version of the web-ext tool used to lint the extension.
+        type: string
+        default: 10.7.0
+    outputs:
+      extension-name:
+        description: Base name of the archives.
+        value: ${{ jobs.build.outputs.extension-name }}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+
+    outputs:
+      extension-name: ${{ steps.names.outputs.extension-name }}
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Resolve archive names
+        id: names
+        env:
+          EXTENSION_NAME: ${{ inputs.extension-name }}
+        run: |
+          repository_name="${GITHUB_REPOSITORY#*/}"
+
+          echo "extension-name=${EXTENSION_NAME:-${repository_name}}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: ${{ inputs.build-command }}
+
+      - name: Lint extension
+        env:
+          WEB_EXT_VERSION: ${{ inputs.web-ext-version }}
+          DISTRIBUTION_DIRECTORY: ${{ inputs.distribution-directory }}
+        run: npx --yes "web-ext@${WEB_EXT_VERSION}" lint --source-dir "${DISTRIBUTION_DIRECTORY}"
+
+      - name: Package extension and sources
+        env:
+          ARCHIVE_BASE_NAME: ${{ steps.names.outputs.extension-name }}-${{ inputs.version }}
+          DISTRIBUTION_DIRECTORY: ${{ inputs.distribution-directory }}
+        run: |
+          mkdir -p artifacts
+
+          (cd "${DISTRIBUTION_DIRECTORY}" && zip -r -X "${GITHUB_WORKSPACE}/artifacts/${ARCHIVE_BASE_NAME}.zip" .)
+          git archive --format=zip --output "artifacts/${ARCHIVE_BASE_NAME}-source.zip" HEAD
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: |
+            artifacts/
+            ${{ inputs.distribution-directory }}/
+          if-no-files-found: error
+
+      - name: Attach archives to the GitHub Release
+        if: ${{ inputs.release-tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: gh release upload "${RELEASE_TAG}" artifacts/*.zip --clobber --repo "${GITHUB_REPOSITORY}"
+
+      - name: Report success
+        env:
+          ARCHIVE_BASE_NAME: ${{ steps.names.outputs.extension-name }}-${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          title="✅ Extension ${ARCHIVE_BASE_NAME} construite"
+
+          {
+            echo "### ${title}"
+            echo
+            echo "- \`${ARCHIVE_BASE_NAME}.zip\`"
+            echo "- \`${ARCHIVE_BASE_NAME}-source.zip\`"
+            echo
+            if [ -n "${RELEASE_TAG}" ]; then
+              echo "Archives jointes à la GitHub Release \`${RELEASE_TAG}\`."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          echo "::notice title=${title}::Build, lint web-ext et archives réussis."
+
+      - name: Report failure
+        if: ${{ failure() }}
+        run: |
+          title="❌ Construction de l'extension échouée"
+          message="L'étape marquée d'une croix rouge ci-dessus (Install dependencies, Build, Lint extension, Package ou Attach archives) contient le détail de l'erreur. Si l'étape Attach archives échoue, vérifiez que le job appelant accorde la permission « contents: write »."
+
+          echo "::error title=${title}::${message}"
+          printf '### %s\n\n%s\n' "${title}" "${message}" >> "${GITHUB_STEP_SUMMARY}"

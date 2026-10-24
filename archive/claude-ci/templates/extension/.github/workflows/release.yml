@@ -1,0 +1,73 @@
+---
+name: Release
+
+# Runs when a release or hotfix pull request is merged into the production
+# branch: publishes the version (tag and GitHub Release), attaches the archives
+# of the extension to it, submits them to the stores that are switched on, then
+# brings the version back into the integration branch.
+#
+# Stores are opt-in, through repository variables:
+#   PUBLISH_CHROME=true   needs CWS_EXTENSION_ID and CWS_PUBLISHER_ID (variables),
+#                         CWS_CLIENT_ID, CWS_CLIENT_SECRET and CWS_REFRESH_TOKEN (secrets)
+#   PUBLISH_FIREFOX=true  needs AMO_API_KEY and AMO_API_SECRET (secrets)
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    uses: FloRobart/Github-ci/.github/workflows/publish-release.yml@v1
+    with:
+      project-type: extension
+      extension-manifest-path: public/manifest.json
+      automation-app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+  package:
+    name: Package
+    needs: release
+    if: ${{ needs.release.outputs.should-publish == 'true' }}
+    permissions:
+      contents: write
+    uses: FloRobart/Github-ci/.github/workflows/extension-build.yml@v1
+    with:
+      version: ${{ needs.release.outputs.version }}
+      release-tag: ${{ needs.release.outputs.tag }}
+
+  stores:
+    name: Stores
+    needs: [release, package]
+    uses: FloRobart/Github-ci/.github/workflows/extension-publish.yml@v1
+    with:
+      version: ${{ needs.release.outputs.version }}
+      extension-name: ${{ needs.package.outputs.extension-name }}
+      publish-to-chrome-web-store: ${{ vars.PUBLISH_CHROME == 'true' }}
+      chrome-extension-id: ${{ vars.CWS_EXTENSION_ID }}
+      chrome-publisher-id: ${{ vars.CWS_PUBLISHER_ID }}
+      publish-to-firefox-add-ons: ${{ vars.PUBLISH_FIREFOX == 'true' }}
+    secrets:
+      CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+      CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+      CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+      AMO_API_KEY: ${{ secrets.AMO_API_KEY }}
+      AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+
+  back-merge:
+    name: Back-merge
+    needs: release
+    if: ${{ needs.release.outputs.should-publish == 'true' }}
+    uses: FloRobart/Github-ci/.github/workflows/back-merge.yml@v1
+    with:
+      released-version: ${{ needs.release.outputs.version }}
+      project-type: extension
+      extension-manifest-path: public/manifest.json
+      automation-app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}

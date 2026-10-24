@@ -1,0 +1,13 @@
+{
+  "name": "github-ci-toolkit",
+  "version": "1.0.0",
+  "description": "Scripts behind the reusable Git workflow pipelines. No dependency: only Node.js built-in modules.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

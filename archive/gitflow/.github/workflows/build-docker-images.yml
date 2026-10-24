@@ -1,0 +1,134 @@
+name: Build Docker images
+
+# Reusable workflow: builds each Docker image of the project once and pushes it
+# to the GitHub Container Registry and to Docker Hub.
+#
+# Published references, for each image:
+#   ghcr.io/<repository owner>/<image name>:<version>
+#   <Docker Hub user>/<image name>:<version>
+#   and the same with ":latest" when "tag-latest" is true.
+#
+# Docker Hub is skipped when the DOCKERHUB_USERNAME secret is not defined.
+
+on:
+  workflow_call:
+    inputs:
+      git-reference:
+        description: Branch, tag or commit to build.
+        type: string
+        required: true
+      version:
+        description: Image tag, for example "1.5.0" or "1.5.0-rc.2".
+        type: string
+        required: true
+      tag-latest:
+        description: Also moves the "latest" tag. Keep it false for release candidates.
+        type: boolean
+        default: false
+      docker-images:
+        description: >-
+          JSON list of the images to build. Each image accepts "name" (default: the
+          repository name), "context" (default: ".") and "dockerfile" (default: the
+          Dockerfile at the root of the context; a given path starts from the root of
+          the repository, not from the context).
+        type: string
+        default: '[{"context": "."}]'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.image.name || github.event.repository.name }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(inputs.docker-images) }}
+
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.git-reference }}
+
+      - name: List the image references to publish
+        id: references
+        env:
+          CONFIGURED_IMAGE_NAME: ${{ matrix.image.name }}
+          VERSION: ${{ inputs.version }}
+          TAG_LATEST: ${{ inputs.tag-latest }}
+        run: |
+          # Registries refuse image names containing upper-case letters.
+          image_name="${CONFIGURED_IMAGE_NAME:-${GITHUB_REPOSITORY#*/}}"
+          image_name="${image_name,,}"
+
+          registries=("ghcr.io/${GITHUB_REPOSITORY_OWNER,,}")
+          if [ -n "${DOCKERHUB_USERNAME}" ]; then
+            registries+=("${DOCKERHUB_USERNAME}")
+          fi
+
+          image_tags=("${VERSION}")
+          if [ "${TAG_LATEST}" = 'true' ]; then
+            image_tags+=('latest')
+          fi
+
+          {
+            echo 'list<<REFERENCES_END'
+            for registry in "${registries[@]}"; do
+              for image_tag in "${image_tags[@]}"; do
+                echo "${registry}/${image_name}:${image_tag}"
+              done
+            done
+            echo 'REFERENCES_END'
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "name=${image_name}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # The image is built once, then pushed under every reference.
+      - name: Build and push the image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image.context || '.' }}
+          file: ${{ matrix.image.dockerfile }}
+          push: true
+          tags: ${{ steps.references.outputs.list }}
+          # Links the GHCR package to the repository: it shows on the repository page
+          # and inherits the access rights of the repository.
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=${{ steps.references.outputs.name }}
+          cache-to: type=gha,mode=max,scope=${{ steps.references.outputs.name }}
+
+      - name: Report the published image
+        env:
+          IMAGE_REFERENCES: ${{ steps.references.outputs.list }}
+        run: |
+          {
+            echo "### 🐳 Image publiée"
+            echo
+            echo '```text'
+            echo "${IMAGE_REFERENCES}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,0 +1,93 @@
+---
+name: Release candidate
+
+# Reusable workflow: publishes a release candidate of the release/x.y.z or
+# hotfix/x.y.z branch it is started on, as a "vX.Y.Z-rc.N" tag and a GitHub
+# pre-release. Building the artifacts of the candidate (images, archives) is
+# left to the jobs the caller chains after this one.
+#
+# The calling workflow is expected to be triggered by "workflow_dispatch" and
+# started on the release or hotfix branch.
+
+on:
+  workflow_call:
+    inputs:
+      project-type:
+        description: 'How the project stores its version: "node", "flutter" or "extension".'
+        type: string
+        required: true
+      extension-manifest-path:
+        description: Path of the manifest.json, for extension projects only.
+        type: string
+        default: public/manifest.json
+      release-name:
+        description: Project name used in the release title. Empty deduces it from the repository name.
+        type: string
+        default: ''
+      automation-app-client-id:
+        description: Client ID of the automation GitHub App.
+        type: string
+        default: ''
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY:
+        description: Private key of the automation GitHub App.
+        required: false
+    outputs:
+      version:
+        description: Version of the candidate, for example "1.4.0-rc.2".
+        value: ${{ jobs.candidate.outputs.version }}
+      tag:
+        description: Tag of the candidate, for example "v1.4.0-rc.2".
+        value: ${{ jobs.candidate.outputs.tag }}
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    name: Create release candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Two runs at the same time would compute the same candidate number.
+    concurrency:
+      group: release-candidate-${{ github.repository }}-${{ github.ref }}
+      cancel-in-progress: false
+
+    outputs:
+      version: ${{ steps.candidate.outputs.version }}
+      tag: ${{ steps.candidate.outputs.tag }}
+
+    steps:
+      # The whole history is needed to list the pull requests of the candidate.
+      - name: Checkout project
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Checked out at the exact commit of this reusable workflow, so the
+      # scripts can never be out of sync with the workflow that runs them.
+      - name: Checkout CI toolkit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-toolkit
+          persist-credentials: false
+
+      - name: Authenticate automation
+        id: automation
+        uses: ./.ci-toolkit/actions/authenticate-automation
+        with:
+          app-client-id: ${{ inputs.automation-app-client-id }}
+          app-private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+      - name: Create release candidate
+        id: candidate
+        env:
+          GH_TOKEN: ${{ steps.automation.outputs.token }}
+          PROJECT_TYPE: ${{ inputs.project-type }}
+          EXTENSION_MANIFEST_PATH: ${{ inputs.extension-manifest-path }}
+          RELEASE_NAME: ${{ inputs.release-name }}
+        run: node .ci-toolkit/toolkit/commands/create-release-candidate.mjs

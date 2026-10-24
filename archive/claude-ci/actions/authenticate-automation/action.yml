@@ -1,0 +1,60 @@
+name: Authenticate automation
+description: >
+  Creates a token for the automation GitHub App and configures git and the
+  GitHub CLI to act as that App. Branches and pull requests created with this
+  token trigger workflows, which the default GITHUB_TOKEN cannot do.
+
+inputs:
+  app-client-id:
+    description: Client ID of the automation GitHub App.
+    required: true
+  app-private-key:
+    description: Private key of the automation GitHub App.
+    required: true
+
+outputs:
+  token:
+    description: Installation token of the GitHub App, to pass as GH_TOKEN to the following steps.
+    value: ${{ steps.app-token.outputs.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check GitHub App credentials
+      shell: bash
+      env:
+        APP_CLIENT_ID: ${{ inputs.app-client-id }}
+        APP_PRIVATE_KEY: ${{ inputs.app-private-key }}
+      run: node "${GITHUB_ACTION_PATH}/../../toolkit/commands/check-automation-credentials.mjs"
+
+    - name: Create GitHub App token
+      id: app-token
+      uses: actions/create-github-app-token@v3
+      with:
+        client-id: ${{ inputs.app-client-id }}
+        private-key: ${{ inputs.app-private-key }}
+
+    - name: Explain token creation failure
+      if: ${{ failure() && steps.app-token.conclusion == 'failure' }}
+      shell: bash
+      run: |
+        title="❌ Connexion de la GitHub App impossible"
+        message="Les identifiants sont présents mais GitHub les a refusés. Vérifiez : (1) que AUTOMATION_APP_CLIENT_ID est bien le « Client ID » de l'App ; (2) que AUTOMATION_APP_PRIVATE_KEY contient le fichier .pem complet, lignes BEGIN et END comprises ; (3) que l'App est installée sur ce dépôt (Settings de l'App → Install App)."
+
+        echo "::error title=${title}::${message}"
+        printf '### %s\n\n%s\n' "${title}" "${message}" >> "${GITHUB_STEP_SUMMARY}"
+
+    - name: Configure git identity
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+      run: |
+        bot_name="${APP_SLUG}[bot]"
+        bot_user_id="$(gh api "/users/${bot_name}" --jq '.id')"
+
+        git config --global user.name "${bot_name}"
+        git config --global user.email "${bot_user_id}+${bot_name}@users.noreply.github.com"
+
+        # Makes git push and fetch authenticate with GH_TOKEN, like the GitHub CLI.
+        gh auth setup-git

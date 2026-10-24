@@ -1,0 +1,50 @@
+name: Gitflow checks
+
+# Reusable workflow (owner: gitflow/): the gitflow rules of a pull request.
+#
+#   1. Branch flow       feature/* → dev, release/vX.Y.Z or hotfix/* → main, main → dev
+#   2. Commit messages   Conventional Commits, because the version is computed from them
+#   3. Release version   a release/vX.Y.Z branch must carry the version given by its commits
+#
+# Called on "pull_request" events only. Every check runs even when a previous one
+# failed, so every problem is reported at once.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      SOURCE_BRANCH: ${{ github.head_ref }}
+      TARGET_BRANCH: ${{ github.base_ref }}
+      BASE_COMMIT: ${{ github.event.pull_request.base.sha }}
+      HEAD_COMMIT: ${{ github.event.pull_request.head.sha }}
+
+    steps:
+      # The whole history and every tag are needed to read the commits and compute the version.
+      - name: Checkout the full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load the gitflow scripts
+        uses: FloRobart/Github-ci/gitflow/scripts@main
+
+      - name: Check the branch flow
+        run: check-pull-request-branches.sh "${SOURCE_BRANCH}" "${TARGET_BRANCH}"
+
+      - name: Check the commit messages
+        if: ${{ !cancelled() }}
+        run: check-commit-messages.sh "${BASE_COMMIT}" "${HEAD_COMMIT}"
+
+      - name: Check the release version
+        if: ${{ !cancelled() && startsWith(github.head_ref, 'release/') }}
+        run: check-release-branch-version.sh "${SOURCE_BRANCH}" "${HEAD_COMMIT}"

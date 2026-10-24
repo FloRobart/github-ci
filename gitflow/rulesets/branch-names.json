@@ -1,0 +1,27 @@
+{
+  "name": "Gitflow - branch names",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": ["~ALL"],
+      "exclude": [
+        "refs/heads/main",
+        "refs/heads/dev",
+        "refs/heads/feature/**",
+        "refs/heads/feat/**",
+        "refs/heads/bugfix/**",
+        "refs/heads/fix/**",
+        "refs/heads/hotfix/**",
+        "refs/heads/release/v*",
+        "refs/heads/dependabot/**"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "type": "creation"
+    }
+  ]
+}

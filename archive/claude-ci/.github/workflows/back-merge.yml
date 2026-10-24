@@ -1,0 +1,130 @@
+---
+name: Back-merge
+
+# Reusable workflow: once a version is published, brings the production branch
+# back into the branches still being worked on.
+#   1. Opens a pull request into the integration branch and asks GitHub to
+#      merge it as soon as its checks pass.
+#   2. Merges production into the release branch in progress, if there is one
+#      (case of a hotfix published while a release is being prepared).
+
+on:
+  workflow_call:
+    inputs:
+      released-version:
+        description: Version that was just published, for example "1.4.0".
+        type: string
+        required: true
+      project-type:
+        description: 'How the project stores its version: "node", "flutter" or "extension".'
+        type: string
+        required: true
+      production-branch:
+        description: Name of the production branch.
+        type: string
+        default: main
+      integration-branch:
+        description: Name of the integration branch.
+        type: string
+        default: develop
+      extension-manifest-path:
+        description: Path of the manifest.json, for extension projects only.
+        type: string
+        default: public/manifest.json
+      automation-app-client-id:
+        description: Client ID of the automation GitHub App.
+        type: string
+        default: ''
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY:
+        description: Private key of the automation GitHub App.
+        required: false
+    outputs:
+      pull-request-url:
+        description: URL of the back-merge pull request, empty when no back-merge was needed.
+        value: ${{ jobs.integration-branch.outputs.pull-request-url }}
+
+permissions:
+  contents: read
+
+jobs:
+  integration-branch:
+    name: Back-merge into integration branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    outputs:
+      pull-request-url: ${{ steps.back-merge.outputs.pull-request-url }}
+
+    steps:
+      # The whole history is needed to compare the two branches.
+      - name: Checkout project
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Checked out at the exact commit of this reusable workflow, so the
+      # scripts can never be out of sync with the workflow that runs them.
+      - name: Checkout CI toolkit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-toolkit
+          persist-credentials: false
+
+      - name: Authenticate automation
+        id: automation
+        uses: ./.ci-toolkit/actions/authenticate-automation
+        with:
+          app-client-id: ${{ inputs.automation-app-client-id }}
+          app-private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+      - name: Open back-merge pull request
+        id: back-merge
+        env:
+          GH_TOKEN: ${{ steps.automation.outputs.token }}
+          RELEASED_VERSION: ${{ inputs.released-version }}
+          PRODUCTION_BRANCH: ${{ inputs.production-branch }}
+          INTEGRATION_BRANCH: ${{ inputs.integration-branch }}
+        run: node .ci-toolkit/toolkit/commands/open-back-merge.mjs
+
+  release-branch:
+    name: Update release branch in progress
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # The whole history is needed to merge production into the release branch.
+      - name: Checkout project
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Checked out at the exact commit of this reusable workflow, so the
+      # scripts can never be out of sync with the workflow that runs them.
+      - name: Checkout CI toolkit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-toolkit
+          persist-credentials: false
+
+      - name: Authenticate automation
+        id: automation
+        uses: ./.ci-toolkit/actions/authenticate-automation
+        with:
+          app-client-id: ${{ inputs.automation-app-client-id }}
+          app-private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+      - name: Merge production into the release branch
+        env:
+          GH_TOKEN: ${{ steps.automation.outputs.token }}
+          RELEASED_VERSION: ${{ inputs.released-version }}
+          PRODUCTION_BRANCH: ${{ inputs.production-branch }}
+          PROJECT_TYPE: ${{ inputs.project-type }}
+          EXTENSION_MANIFEST_PATH: ${{ inputs.extension-manifest-path }}
+        run: node .ci-toolkit/toolkit/commands/synchronize-release-branches.mjs

@@ -1,0 +1,45 @@
+---
+name: Release candidate
+
+# Button of the Actions tab: publishes a test version (x.y.z-rc.N) of a release
+# or hotfix branch. Start it with the release/x.y.z or hotfix/x.y.z branch
+# selected in the "Use workflow from" menu.
+#
+# The image is tagged x.y.z-rc.N only: "latest" is never moved by a candidate.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality
+    uses: FloRobart/Github-ci/.github/workflows/node-quality.yml@v1
+    with:
+      node-version: '24'
+
+  candidate:
+    name: Candidate
+    needs: quality
+    uses: FloRobart/Github-ci/.github/workflows/release-candidate.yml@v1
+    with:
+      project-type: node
+      automation-app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+  docker-image:
+    name: Docker image
+    needs: candidate
+    permissions:
+      contents: read
+      packages: write
+    uses: FloRobart/Github-ci/.github/workflows/docker-publish.yml@v1
+    with:
+      image-name: my-api # TODO: name of the image, for example "econoris-server"
+      version: ${{ needs.candidate.outputs.version }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

@@ -1,0 +1,111 @@
+name: Create release branch
+
+# Reusable workflow: opens a release from "dev", or a hotfix from "main".
+#
+#   1. Creates the branch "release-vX.Y.Z" (or "hotfix/vX.Y.Z") from the current branch.
+#   2. Merges "main" into it, so the release never conflicts with production.
+#   3. Writes the version in package.json or pubspec.yaml.
+#   4. Opens the pull request towards "main".
+#
+# check-gitflow-branches.yml has already made sure that no other version is in progress.
+#
+# GITFLOW_TOKEN is an optional personal access token. GitHub does not start any
+# workflow on a pull request opened with the default token, so without it the
+# checks of the pull request have to be started by hand.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version to release, without the "v" prefix, for example "1.5.0".
+        type: string
+        required: true
+      project-type:
+        description: Either "nodejs" or "flutter", as given by detect-project-type.yml.
+        type: string
+        required: true
+      hotfix:
+        description: True to create a "hotfix/vX.Y.Z" branch instead of a "release-vX.Y.Z" one.
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  VERSION: ${{ inputs.version }}
+  RELEASE_BRANCH: ${{ inputs.hotfix && 'hotfix/v' || 'release-v' }}${{ inputs.version }}
+
+jobs:
+  create:
+    name: Create
+    runs-on: ubuntu-latest
+
+    steps:
+      # The full history is needed to merge main into the release branch.
+      - name: Checkout the full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITFLOW_TOKEN || github.token }}
+
+      - name: Create the release branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git switch --create "${RELEASE_BRANCH}"
+
+      # Brings back what only exists in production (the previous version number, a
+      # hotfix) when it was not merged back into dev. A hotfix already starts from main.
+      - name: Merge main into the release branch
+        run: |
+          if git merge --no-edit origin/main; then
+            exit 0
+          fi
+
+          echo "::error title=Conflit entre dev et main::main contient des changements incompatibles avec dev. Mergez main dans dev (pull request main → dev), puis relancez la release."
+          exit 1
+
+      - name: Write the version in package.json
+        if: inputs.project-type == 'nodejs'
+        # "--ignore-scripts" keeps the project's "version" scripts from running: the
+        # dependencies are not installed, and the token is still in the git config.
+        run: npm version "${VERSION}" --no-git-tag-version --allow-same-version --ignore-scripts
+
+      - name: Write the version in pubspec.yaml
+        if: inputs.project-type == 'flutter'
+        run: |
+          # Stores require a build number ("1.5.0+12") that grows with every release.
+          current_build_number=$(grep -E '^version:' pubspec.yaml | grep -oE '\+[0-9]+' | tr -d '+' || true)
+
+          pubspec_version="${VERSION}"
+          if [ -n "${current_build_number}" ]; then
+            pubspec_version="${VERSION}+$((current_build_number + 1))"
+          fi
+
+          sed -i -E "s/^version:.*$/version: ${pubspec_version}/" pubspec.yaml
+
+      - name: Commit the version and push the release branch
+        run: |
+          # "--allow-empty" covers a project whose file already holds this version.
+          git commit --all --allow-empty --message "chore(release): v${VERSION}"
+          git push origin "${RELEASE_BRANCH}"
+
+      - name: Open the pull request towards main
+        env:
+          GH_TOKEN: ${{ secrets.GITFLOW_TOKEN || github.token }}
+        run: |
+          pull_request_body="Version **v${VERSION}**, préparée sur la branche \`${RELEASE_BRANCH}\`.
+
+          - Un correctif se pousse directement sur \`${RELEASE_BRANCH}\`.
+          - Pour essayer cette version avant de la publier : onglet Actions → Gitflow → **Run workflow** → branche \`${RELEASE_BRANCH}\`. Une image Docker release candidate \`${VERSION}-rc.N\` est publiée.
+          - Le merge de cette pull request publie la version finale : tag \`v${VERSION}\`, GitHub Release et image Docker \`${VERSION}\` + \`latest\`.
+          - Une seule version à la fois : tant que \`${RELEASE_BRANCH}\` existe, aucune autre release ni aucun hotfix ne peut être créé. Pour abandonner cette version, fermer la pull request et supprimer la branche."
+
+          gh pr create \
+            --base main \
+            --head "${RELEASE_BRANCH}" \
+            --title "chore(release): v${VERSION}" \
+            --body "${pull_request_body}"

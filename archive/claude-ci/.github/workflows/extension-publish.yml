@@ -1,0 +1,195 @@
+---
+name: Extension publish
+
+# Reusable workflow: submits an extension built by "extension-build.yml" to the
+# Chrome Web Store and to addons.mozilla.org. Each store is opt-in, so a
+# project can release on GitHub long before its store accounts are ready.
+#
+# Both stores review submissions on their side: a successful run means the
+# version was submitted, not that it is already available to users.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version being published, as used in the archive names.
+        type: string
+        required: true
+      extension-name:
+        description: Base name of the archives, as returned by "extension-build.yml".
+        type: string
+        required: true
+      artifact-name:
+        description: Name of the workflow artifact produced by "extension-build.yml".
+        type: string
+        default: extension
+      distribution-directory:
+        description: Directory produced by the build.
+        type: string
+        default: dist
+      node-version:
+        description: Node.js version to install.
+        type: string
+        default: '24'
+      publish-to-chrome-web-store:
+        description: Submits the extension to the Chrome Web Store.
+        type: boolean
+        default: false
+      chrome-extension-id:
+        description: Identifier of the extension in the Chrome Web Store.
+        type: string
+        default: ''
+      chrome-publisher-id:
+        description: Identifier of the publisher in the Chrome Web Store.
+        type: string
+        default: ''
+      chrome-upload-cli-version:
+        description: Version of the chrome-webstore-upload-cli tool.
+        type: string
+        default: 4.0.2
+      publish-to-firefox-add-ons:
+        description: Submits the extension to addons.mozilla.org.
+        type: boolean
+        default: false
+      firefox-metadata-path:
+        description: Path of the listing metadata file sent to addons.mozilla.org.
+        type: string
+        default: amo-metadata.json
+      web-ext-version:
+        description: Version of the web-ext tool used to submit to addons.mozilla.org.
+        type: string
+        default: 10.7.0
+    secrets:
+      CWS_CLIENT_ID:
+        description: OAuth client ID for the Chrome Web Store API.
+        required: false
+      CWS_CLIENT_SECRET:
+        description: OAuth client secret for the Chrome Web Store API.
+        required: false
+      CWS_REFRESH_TOKEN:
+        description: OAuth refresh token for the Chrome Web Store API.
+        required: false
+      AMO_API_KEY:
+        description: API key (JWT issuer) for addons.mozilla.org.
+        required: false
+      AMO_API_SECRET:
+        description: API secret (JWT secret) for addons.mozilla.org.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  chrome-web-store:
+    name: Chrome Web Store
+    if: ${{ inputs.publish-to-chrome-web-store }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Download extension archives
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-name }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Upload and publish to the Chrome Web Store
+        env:
+          EXTENSION_ID: ${{ inputs.chrome-extension-id }}
+          PUBLISHER_ID: ${{ inputs.chrome-publisher-id }}
+          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          UPLOAD_CLI_VERSION: ${{ inputs.chrome-upload-cli-version }}
+          EXTENSION_ARCHIVE: artifacts/${{ inputs.extension-name }}-${{ inputs.version }}.zip
+        run: npx --yes "chrome-webstore-upload-cli@${UPLOAD_CLI_VERSION}" --source "${EXTENSION_ARCHIVE}"
+
+      - name: Report success
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          title="✅ Version ${VERSION} envoyée au Chrome Web Store"
+          message="L'extension est soumise. Elle sera visible des utilisateurs après la validation de Google."
+
+          echo "::notice title=${title}::${message}"
+          printf '### %s\n\n%s\n' "${title}" "${message}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Report failure
+        if: ${{ failure() }}
+        run: |
+          title="❌ Envoi au Chrome Web Store échoué"
+          message="Le détail est dans l'étape marquée d'une croix rouge ci-dessus. Vérifiez les variables CWS_EXTENSION_ID et CWS_PUBLISHER_ID ainsi que les secrets CWS_CLIENT_ID, CWS_CLIENT_SECRET et CWS_REFRESH_TOKEN (un refresh token peut expirer). La GitHub Release n'est pas affectée : relancez seulement ce job une fois corrigé."
+
+          echo "::error title=${title}::${message}"
+          printf '### %s\n\n%s\n' "${title}" "${message}" >> "${GITHUB_STEP_SUMMARY}"
+
+  firefox-add-ons:
+    name: Firefox Add-ons
+    if: ${{ inputs.publish-to-firefox-add-ons }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # The listing metadata file lives in the repository.
+      - name: Checkout project
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download extension archives
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-name }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Submit to addons.mozilla.org
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+          WEB_EXT_VERSION: ${{ inputs.web-ext-version }}
+          DISTRIBUTION_DIRECTORY: ${{ inputs.distribution-directory }}
+          METADATA_PATH: ${{ inputs.firefox-metadata-path }}
+          SOURCE_ARCHIVE: artifacts/${{ inputs.extension-name }}-${{ inputs.version }}-source.zip
+        run: |
+          npx --yes "web-ext@${WEB_EXT_VERSION}" sign \
+            --source-dir "${DISTRIBUTION_DIRECTORY}" \
+            --artifacts-dir web-ext-artifacts \
+            --channel listed \
+            --amo-metadata "${METADATA_PATH}" \
+            --upload-source-code "${SOURCE_ARCHIVE}" \
+            --approval-timeout 0
+
+      - name: Report success
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          title="✅ Version ${VERSION} envoyée à addons.mozilla.org"
+          message="L'extension est soumise. Elle sera visible des utilisateurs après la validation de Mozilla."
+
+          echo "::notice title=${title}::${message}"
+          printf '### %s\n\n%s\n' "${title}" "${message}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Report failure
+        if: ${{ failure() }}
+        run: |
+          title="❌ Envoi à addons.mozilla.org échoué"
+          message="Le détail est dans l'étape marquée d'une croix rouge ci-dessus. Vérifiez les secrets AMO_API_KEY et AMO_API_SECRET, et que le fichier de métadonnées existe dans le dépôt. La GitHub Release n'est pas affectée : relancez seulement ce job une fois corrigé."
+
+          echo "::error title=${title}::${message}"
+          printf '### %s\n\n%s\n' "${title}" "${message}" >> "${GITHUB_STEP_SUMMARY}"

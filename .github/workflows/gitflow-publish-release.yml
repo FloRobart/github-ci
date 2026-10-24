@@ -1,0 +1,119 @@
+name: Gitflow publish release
+
+# Reusable workflow (owner: gitflow/): publishes the version planned by
+# gitflow-prepare-release.yml, once every build has succeeded.
+#
+#   Release candidate from dev   →  branch release/vX.Y.Z, pull request towards main, pre-release
+#   Other release candidate      →  pre-release
+#   Final version (main)         →  release, pull request main → dev (back-merge)
+#
+# Every step accepts to run twice, so a failed run can simply be re-run.
+#
+# GITFLOW_TOKEN is an optional personal access token, passed with "secrets: inherit".
+# GitHub starts no workflow on a pull request opened with the default token: without
+# it, the checks of the release and back-merge pull requests must be started by
+# closing and reopening them.
+
+on:
+  workflow_call:
+    inputs:
+      kind:
+        description: '"candidate" or "final", from gitflow-prepare-release.yml.'
+        type: string
+        required: true
+      version:
+        description: Version without the "v" prefix, from gitflow-prepare-release.yml.
+        type: string
+        required: true
+      tag:
+        description: Git tag of the version, from gitflow-prepare-release.yml.
+        type: string
+        required: true
+      previous-tag:
+        description: Last final version tag, start of the release notes. Empty for a first release.
+        type: string
+        default: ''
+      new-release-branch:
+        description: Release branch to create, empty when there is none.
+        type: string
+        default: ''
+      release-assets:
+        description: Attaches the files of the "release-assets" artifact of the run to the release.
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      KIND: ${{ inputs.kind }}
+      VERSION: ${{ inputs.version }}
+      TAG: ${{ inputs.tag }}
+      PREVIOUS_TAG: ${{ inputs.previous-tag }}
+      NEW_RELEASE_BRANCH: ${{ inputs.new-release-branch }}
+
+    steps:
+      - name: Load the gitflow scripts
+        uses: FloRobart/Github-ci/gitflow/scripts@main
+
+      #===================================#
+      # Release candidate: release branch #
+      #===================================#
+
+      - name: Create the release branch
+        if: inputs.new-release-branch != ''
+        run: create-branch.sh "${NEW_RELEASE_BRANCH}" "${GITHUB_SHA}"
+
+      - name: Open the release pull request
+        if: inputs.new-release-branch != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITFLOW_TOKEN || github.token }}
+          PULL_REQUEST_BODY: |
+            Release préparée depuis `dev`.
+
+            - Un correctif se pousse directement sur cette branche.
+            - Une nouvelle release candidate : onglet Actions → CI → **Run workflow** → branche `${{ inputs.new-release-branch }}`.
+            - Le merge de cette pull request publie la version finale.
+        run: |
+          final_version_tag="${NEW_RELEASE_BRANCH#release/}"
+          open-pull-request.sh "${NEW_RELEASE_BRANCH}" main "chore(release): ${final_version_tag}" "${PULL_REQUEST_BODY}"
+
+      #================#
+      # GitHub Release #
+      #================#
+
+      - name: Download the release assets
+        if: inputs.release-assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Create the GitHub Release
+        env:
+          ASSETS_DIRECTORY: ${{ inputs.release-assets && 'release-assets' || '' }}
+        run: create-github-release.sh "${TAG}" "${KIND}" "${PREVIOUS_TAG}" "${ASSETS_DIRECTORY}"
+
+      #===========================#
+      # Final version: back-merge #
+      #===========================#
+
+      - name: Open the back-merge pull request
+        if: inputs.kind == 'final'
+        env:
+          GH_TOKEN: ${{ secrets.GITFLOW_TOKEN || github.token }}
+          PULL_REQUEST_BODY: |
+            Ramène dans `dev` ce qui a été publié sur `main` (release ou hotfix).
+
+            ⚠️ À merger avec **Create a merge commit** : `dev` et `main` doivent garder un historique commun.
+        run: |
+          open-pull-request.sh main dev "chore(release): back-merge ${TAG} into dev" "${PULL_REQUEST_BODY}"

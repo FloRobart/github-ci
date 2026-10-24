@@ -1,0 +1,209 @@
+name: Flutter
+
+# Reusable workflow (owner: flutter/): the CI of a Flutter project, gitflow included.
+#
+#   Pull request           →  gitflow checks + quality (format, analyze, tests)
+#   Button (Run workflow)  →  quality, then release candidate: builds + GitHub pre-release
+#   Merge on main          →  quality, then final version: builds + GitHub Release
+#
+# The builds depend on the project kind (gitflow/scripts/detect-project-kind.sh):
+#
+#   Application ("-app")  →  web Docker image (when there is a Dockerfile) + APK/AAB
+#   Library ("-lib")      →  nothing to build: the git tag and the GitHub Release are the
+#                            publication, used as a git dependency in pubspec.yaml
+#
+# Only the quality and Android jobs are specific to Flutter: every gitflow step comes
+# from the gitflow-*.yml workflows. See flutter/README.md for the project requirements.
+#
+# Optional secrets, passed with "secrets: inherit": ANDROID_KEYSTORE_BASE64,
+# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD sign the
+# Android build.
+
+on:
+  workflow_call:
+    inputs:
+      flutter-version:
+        description: Flutter version, for example "3.35.0". Empty means the latest stable version.
+        type: string
+        default: ''
+      docker-image:
+        description: Publishes the web version of an application as a Docker image, when it has a Dockerfile at its root.
+        type: boolean
+        default: true
+      android:
+        description: Builds the Android APK and AAB of an application and attaches them to the release.
+        type: boolean
+        default: true
+
+# One run at a time per branch: two clicks on the button, or two merges on main, wait
+# for each other. A pull request only keeps its latest run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  #=========#
+  # Quality #
+  #=========#
+
+  gitflow-checks:
+    name: Gitflow
+    if: github.event_name == 'pull_request'
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-checks.yml@main
+
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ inputs.flutter-version }}
+          cache: true
+
+      - name: Install the dependencies
+        run: flutter pub get
+
+      - name: Check the formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run the tests
+        run: flutter test
+
+  #=========#
+  # Release #
+  #=========#
+
+  prepare-release:
+    name: Prepare release
+    if: github.event_name != 'pull_request'
+    needs: quality
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-prepare-release.yml@main
+
+  docker-image:
+    name: Docker image
+    if: >-
+      inputs.docker-image
+      && needs.prepare-release.outputs.project-kind == 'application'
+      && needs.prepare-release.outputs.has-dockerfile == 'true'
+    needs: prepare-release
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-docker-image.yml@main
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image-name: ${{ needs.prepare-release.outputs.project-name }}
+      image-tag: ${{ needs.prepare-release.outputs.version }}
+      tag-latest: ${{ needs.prepare-release.outputs.kind == 'final' }}
+
+  android:
+    name: Android
+    if: inputs.android && needs.prepare-release.outputs.project-kind == 'application'
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+      RELEASE_FILE_NAME: ${{ needs.prepare-release.outputs.project-name }}-${{ needs.prepare-release.outputs.tag }}
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ inputs.flutter-version }}
+          cache: true
+
+      # Writes the files read by android/app/build.gradle, as described in the Flutter
+      # documentation ("Sign the app"). Without the secrets, Flutter signs the release
+      # with the debug key: the APK installs, but cannot be published on a store.
+      - name: Configure the Android signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "::warning title=Android non signé::Le secret ANDROID_KEYSTORE_BASE64 n'existe pas : l'APK et l'AAB sont signés avec la clé de debug."
+            exit 0
+          fi
+
+          echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > android/app/upload-keystore.jks
+
+          cat > android/key.properties <<END_OF_PROPERTIES
+          storeFile=upload-keystore.jks
+          storePassword=${ANDROID_KEYSTORE_PASSWORD}
+          keyAlias=${ANDROID_KEY_ALIAS}
+          keyPassword=${ANDROID_KEY_PASSWORD}
+          END_OF_PROPERTIES
+
+      # The build name keeps only "X.Y.Z": stores refuse "-rc.N". The build number must
+      # grow with every build sent to a store: the run number of the workflow does.
+      - name: Build the APK and the AAB
+        run: |
+          build_name="${VERSION%%-*}"
+
+          flutter build apk --release --build-name="${build_name}" --build-number="${GITHUB_RUN_NUMBER}"
+          flutter build appbundle --release --build-name="${build_name}" --build-number="${GITHUB_RUN_NUMBER}"
+
+      - name: Name the release files
+        run: |
+          mkdir release-assets
+          cp build/app/outputs/flutter-apk/app-release.apk "release-assets/${RELEASE_FILE_NAME}.apk"
+          cp build/app/outputs/bundle/release/app-release.aab "release-assets/${RELEASE_FILE_NAME}.aab"
+
+      # Picked up by gitflow-publish-release.yml and attached to the release.
+      - name: Upload the release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-release:
+    name: Publish release
+    # The Docker image and the Android build can each be skipped (turned off, mobile
+    # application, library): a skipped job is fine, a failed one stops the release.
+    if: ${{ !failure() && !cancelled() && needs.prepare-release.result == 'success' }}
+    needs: [prepare-release, docker-image, android]
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-publish-release.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      kind: ${{ needs.prepare-release.outputs.kind }}
+      version: ${{ needs.prepare-release.outputs.version }}
+      tag: ${{ needs.prepare-release.outputs.tag }}
+      previous-tag: ${{ needs.prepare-release.outputs.previous-tag }}
+      new-release-branch: ${{ needs.prepare-release.outputs.new-release-branch }}
+      release-assets: ${{ needs.android.result == 'success' }}
