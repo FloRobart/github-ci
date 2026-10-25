@@ -9,7 +9,7 @@ Un projet l'importe avec **un seul fichier** de quelques lignes, **le même pour
 ```mermaid
 flowchart LR
     project["Projet<br/>.github/workflows/ci.yml"] --> auto["Détection<br/>auto.yml"]
-    auto --> type["CI du type<br/>nodejs.yml · astro.yml · flutter.yml · extension.yml"]
+    auto --> type["CI du type<br/>nodejs.yml · astro.yml · flutter.yml · extension.yml · database.yml"]
     type --> gitflow["CI globale<br/>gitflow-*.yml"]
 ```
 
@@ -17,7 +17,7 @@ flowchart LR
 |---|---|---|
 | **Projet** | Le même `ci.yml` partout, qui appelle `auto.yml` | [auto/example/ci.yml](auto/example/ci.yml) |
 | **Auto** | Détecte le type du projet et lance la CI de ce type | [auto/](auto/) |
-| **Type** | Ce qui dépend de la techno : installation, lint, types, tests, build Android, Google Play, paquet npm ou pub.dev, stores d'extensions… | [nodejs/](nodejs/), [astro/](astro/), [flutter/](flutter/), [extension/](extension/) |
+| **Type** | Ce qui dépend de la techno : installation, lint, types, tests, build Android, Google Play, paquet npm ou pub.dev, stores d'extensions, migrations de base de données… | [nodejs/](nodejs/), [astro/](astro/), [flutter/](flutter/), [extension/](extension/), [database/](database/) |
 | **Gitflow** | Ce qui est commun à tous : règles de branches, messages de commit, version, détection du type, image Docker, GitHub Release, back-merge | [gitflow/](gitflow/) |
 
 Chaque niveau reste utilisable seul : un projet peut appeler directement une CI de type, et une CI de type appelle les briques gitflow. Chaque type branche les mêmes briques gitflow dans le même ordre. Ajouter un type, c'est écrire son job `quality`, recopier ce câblage, puis ajouter sa règle à la détection et son job à `auto.yml`.
@@ -33,6 +33,7 @@ Les fichiers à la racine et le suffixe du nom du dépôt disent ce qu'est le pr
 | `package.json` + `Dockerfile` | Application Node.js, ou site Astro avec la dépendance `astro` | Image Docker |
 | `package.json` + un nom en `-extension` | Extension navigateur | Archive `.zip`, puis Chrome Web Store et addons.mozilla.org |
 | `package.json` + un nom en `-lib` | Librairie Node.js | Paquet npm |
+| `Dockerfile` + un nom en `-database` | Migrations de base de données (dbmate) | Image Docker `…-migrations` |
 
 Les règles exactes et les cas refusés sont dans [gitflow/README.md → Type de projet](gitflow/README.md#type-de-projet).
 
@@ -61,7 +62,7 @@ Les détails (règles, calcul de version, réglages du dépôt) sont dans [gitfl
 ## Installer dans un projet
 
 1. Copier [auto/example/ci.yml](auto/example/ci.yml) dans le projet, sous `.github/workflows/ci.yml` : voir [auto/README.md](auto/README.md).
-2. Suivre les prérequis du README du type : [Node.js](nodejs/README.md), [Astro](astro/README.md), [Flutter](flutter/README.md) ou [Extension](extension/README.md).
+2. Suivre les prérequis du README du type : [Node.js](nodejs/README.md), [Astro](astro/README.md), [Flutter](flutter/README.md), [Extension](extension/README.md) ou [Database](database/README.md).
 3. Faire les réglages du dépôt, une fois par projet : [gitflow/README.md → Installer dans un projet](gitflow/README.md#installer-dans-un-projet).
 
 ## Organisation de ce dépôt
@@ -77,12 +78,13 @@ Les détails (règles, calcul de version, réglages du dépôt) sont dans [gitfl
 ├── astro.yml                    → appartient à astro/
 ├── flutter.yml                  → appartient à flutter/
 ├── extension.yml                → appartient à extension/
+├── database.yml                 → appartient à database/
 └── self-tests.yml               → CI de ce dépôt, jamais appelée par les projets
 gitflow/
 ├── scripts/                La logique du git flow et la détection du type, en bash, testables en local
 ├── tests/                  Tests des scripts
 └── rulesets/               Protections de branches à importer dans chaque projet
-auto/ · nodejs/ · astro/ · flutter/ · extension/
+auto/ · nodejs/ · astro/ · flutter/ · extension/ · database/
 └── example/                Fichiers à copier dans un projet
 archive/                    Anciennes versions, conservées pour mémoire
 ```

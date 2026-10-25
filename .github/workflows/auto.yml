@@ -3,6 +3,7 @@ name: Auto
 # Reusable workflow (owner: auto/): the single entry point shared by every project. It
 # detects what the project is, then runs the CI of its type, gitflow included.
 #
+#   name ending with "-database", Dockerfile      →  database.yml   (migrations image)
 #   pubspec.yaml                                  →  flutter.yml    (application or library)
 #   package.json, name ending with "-extension"   →  extension.yml
 #   package.json, "astro" dependency, Dockerfile  →  astro.yml
@@ -48,6 +49,10 @@ on:
         description: Google Play track receiving a final version (Flutter projects).
         type: string
         default: production
+      postgres-version:
+        description: PostgreSQL version the migrations are tested on (database projects).
+        type: string
+        default: '18'
 
 permissions:
   contents: read
@@ -154,3 +159,16 @@ jobs:
     with:
       node-version: ${{ inputs.node-version }}
       distribution-directory: ${{ inputs.distribution-directory }}
+
+  database:
+    name: Project
+    needs: detect
+    if: needs.detect.outputs.type == 'database'
+    uses: FloRobart/Github-ci/.github/workflows/database.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    with:
+      postgres-version: ${{ inputs.postgres-version }}

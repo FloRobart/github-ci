@@ -5,6 +5,10 @@
 #
 # The rules are read from top to bottom, the first one that matches wins:
 #
+#   name ending with "-database" (database migrations, whatever the other files)
+#     a Dockerfile                   →  migrations image
+#     no Dockerfile                  →  refused: the migrations are published as a Docker image
+#
 #   pubspec.yaml (Flutter, even next to a package.json used for tooling)
 #     name ending with "-lib"        →  library, which must not have a Dockerfile
 #     name ending with "-app"        →  application (mobile only when there is no Dockerfile)
@@ -24,8 +28,8 @@
 #
 # Printed keys:
 #
-#   type            "flutter", "nodejs", "astro" or "extension": the type CI to run
-#   kind            "application", "library" or "extension": what the type CI publishes
+#   type            "flutter", "nodejs", "astro", "extension" or "database": the type CI to run
+#   kind            "application", "library", "extension" or "migrations": what the type CI publishes
 #   has-dockerfile  "true" when a Dockerfile exists at the root, "false" otherwise
 #
 # Usage: detect-project.sh <project name, as printed by to-image-name.sh>
@@ -40,6 +44,7 @@ source "${SCRIPTS_DIRECTORY}/common.sh"
 readonly APPLICATION_SUFFIX='-app'
 readonly LIBRARY_SUFFIX='-lib'
 readonly EXTENSION_SUFFIX='-extension'
+readonly DATABASE_SUFFIX='-database'
 
 main() {
     local project_name="$1"
@@ -57,6 +62,12 @@ detect_type_and_kind() {
     local project_name="$1"
     local has_dockerfile="$2"
 
+    # A database project may hold a package.json for its tooling: the suffix wins.
+    if [[ "${project_name}" == *"${DATABASE_SUFFIX}" ]]; then
+        detect_database_project "${project_name}" "${has_dockerfile}"
+        return
+    fi
+
     if [ -f pubspec.yaml ]; then
         detect_flutter_project "${project_name}" "${has_dockerfile}"
         return
@@ -67,7 +78,22 @@ detect_type_and_kind() {
         return
     fi
 
-    fail 'Projet non reconnu' "Ni pubspec.yaml (Flutter) ni package.json (Node.js) à la racine de ${project_name} : la CI ne sait pas quel type de projet construire."
+    fail 'Projet non reconnu' "Ni pubspec.yaml (Flutter) ni package.json (Node.js) à la racine de ${project_name}, et pas de suffixe ${DATABASE_SUFFIX} : la CI ne sait pas quel type de projet construire."
+}
+
+#==========#
+# Database #
+#==========#
+
+detect_database_project() {
+    local project_name="$1"
+    local has_dockerfile="$2"
+
+    if [ "${has_dockerfile}" = 'false' ]; then
+        fail 'Dockerfile manquant' "${project_name} se termine par ${DATABASE_SUFFIX} mais n'a pas de Dockerfile à la racine : les migrations d'une base de données sont publiées en image Docker."
+    fi
+
+    print_type_and_kind 'database' 'migrations'
 }
 
 #=========#

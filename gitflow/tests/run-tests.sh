@@ -169,6 +169,22 @@ test_node_project_detection() {
     assert_equals 'librairie de composants Astro : librairie npm' "$(expected_project nodejs library false)" "$(detect-project.sh 'astro-components-lib')"
 }
 
+test_database_project_detection() {
+    echo 'detect-project.sh : base de données'
+
+    move_into_new_project Dockerfile
+    assert_equals '-database avec Dockerfile : migrations' "$(expected_project database migrations true)" "$(detect-project.sh 'econoris-database')"
+
+    move_into_new_project Dockerfile package.json
+    assert_equals '-database prioritaire sur package.json' "$(expected_project database migrations true)" "$(detect-project.sh 'econoris-database')"
+
+    move_into_new_project Dockerfile pubspec.yaml
+    assert_equals '-database prioritaire sur pubspec.yaml' "$(expected_project database migrations true)" "$(detect-project.sh 'econoris-database')"
+
+    move_into_new_project
+    assert_fails '-database sans Dockerfile refusé' detect-project.sh 'econoris-database'
+}
+
 test_unknown_project_detection() {
     echo 'detect-project.sh : autres projets'
 
@@ -305,6 +321,7 @@ test_plan_release() {
 test_image_name
 test_flutter_project_detection
 test_node_project_detection
+test_database_project_detection
 test_unknown_project_detection
 test_pull_request_branches
 test_commit_messages

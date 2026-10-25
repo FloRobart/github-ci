@@ -1,0 +1,23 @@
+# CI of the project: gitflow, quality and releases.
+# Direct import of one type CI: auto/example/ci.yml is the same for every project.
+# Everything lives in FloRobart/Github-ci, see database/README.md over there.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write       # tags, releases and release branches
+  packages: write       # Docker images on GHCR
+  pull-requests: write  # release and back-merge pull requests
+
+jobs:
+  # Keep the job id "ci": the ruleset protected-branches-type-ci.json expects checks
+  # named "ci / ...".
+  ci:
+    uses: FloRobart/Github-ci/.github/workflows/database.yml@main
+    secrets: inherit

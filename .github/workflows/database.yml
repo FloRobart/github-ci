@@ -1,0 +1,209 @@
+name: Database
+
+# Reusable workflow (owner: database/): the CI of a database project, gitflow included.
+#
+#   Pull request           →  gitflow checks + quality (migrations tested on an empty database)
+#   Button (Run workflow)  →  quality, then release candidate: migrations image + GitHub pre-release
+#   Merge on main          →  quality, then final version: migrations image + GitHub Release
+#
+# A database project is a repository whose name ends with "-database" and that has a
+# Dockerfile (gitflow/scripts/detect-project.sh). The Dockerfile builds a dbmate image
+# holding every migration: once started, it applies the pending migrations, then exits.
+#
+# The image is not named after the repository: the "-database" suffix becomes
+# "-migrations", because the image holds the migrations, not the database itself.
+#
+#   econoris-database  →  ghcr.io/<owner>/econoris-migrations, <Docker Hub user>/econoris-migrations
+#
+# The quality job builds the image, then runs it against a throwaway PostgreSQL:
+# every migration is applied, rolled back, then applied again, so a broken "up" or
+# "down" section is seen in the pull request rather than in production.
+#
+# Only the quality job is specific to databases: every gitflow step comes from the
+# gitflow-*.yml workflows. See database/README.md for the project requirements.
+#
+# Optional secrets, passed with "secrets: inherit": DOCKERHUB_USERNAME and DOCKERHUB_TOKEN.
+
+on:
+  workflow_call:
+    inputs:
+      postgres-version:
+        description: PostgreSQL version the migrations are tested on, the same as in production.
+        type: string
+        default: '18'
+
+# One run at a time per branch: two clicks on the button, or two merges on main, wait
+# for each other. A pull request only keeps its latest run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  #=========#
+  # Quality #
+  #=========#
+
+  gitflow-checks:
+    name: Gitflow
+    if: github.event_name == 'pull_request'
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-checks.yml@main
+
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    outputs:
+      image-name: ${{ steps.image-name.outputs.name }}
+
+    # Throwaway database, empty at the start of every run.
+    services:
+      postgres:
+        image: postgres:${{ inputs.postgres-version }}
+        env:
+          POSTGRES_DB: migrations
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d migrations"
+          --health-interval 5s
+          --health-timeout 30s
+          --health-retries 10
+
+    env:
+      # Read by dbmate inside the image. "--network host" lets the image reach the
+      # database on localhost.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/migrations?sslmode=disable
+      MIGRATIONS_DIRECTORY: db/migrations
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load the gitflow scripts
+        uses: FloRobart/Github-ci/gitflow/scripts@main
+
+      # "econoris-database" gives "econoris-migrations".
+      - name: Compute the image name
+        id: image-name
+        env:
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: |
+          project_name=$(to-image-name.sh "${REPOSITORY_NAME}")
+          echo "name=${project_name%-database}-migrations" >> "${GITHUB_OUTPUT}"
+
+      - name: Count the migrations
+        run: |
+          if [ ! -d "${MIGRATIONS_DIRECTORY}" ]; then
+            echo "::error title=Dossier de migrations manquant::Les migrations doivent être dans ${MIGRATIONS_DIRECTORY}/, le dossier lu par dbmate."
+            exit 1
+          fi
+
+          migration_count=$(find "${MIGRATIONS_DIRECTORY}" -maxdepth 1 -type f -name '*.sql' | wc -l)
+
+          if [ "${migration_count}" -eq 0 ]; then
+            echo "::error title=Aucune migration::${MIGRATIONS_DIRECTORY}/ ne contient aucun fichier .sql : il n'y a rien à publier."
+            exit 1
+          fi
+
+          echo "MIGRATION_COUNT=${migration_count}" >> "${GITHUB_ENV}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Same build as gitflow-docker-image.yml, loaded locally instead of pushed. The
+      # cache it leaves speeds up the build of the release.
+      - name: Build the migrations image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ steps.image-name.outputs.name }}:quality
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Apply every migration on an empty database
+        env:
+          IMAGE: ${{ steps.image-name.outputs.name }}:quality
+        run: docker run --rm --network host --env DATABASE_URL "${IMAGE}"
+
+      # The same as a deployment where nothing changed: the image must do nothing and succeed.
+      - name: Run the image again, with nothing to apply
+        env:
+          IMAGE: ${{ steps.image-name.outputs.name }}:quality
+        run: docker run --rm --network host --env DATABASE_URL "${IMAGE}"
+
+      # Newest first, so every "down" section runs on the state its "up" section left.
+      - name: Roll back every migration
+        env:
+          IMAGE: ${{ steps.image-name.outputs.name }}:quality
+        run: |
+          for rollback_number in $(seq "${MIGRATION_COUNT}"); do
+            echo "Rollback ${rollback_number} / ${MIGRATION_COUNT}"
+            docker run --rm --network host --env DATABASE_URL "${IMAGE}" --no-dump-schema rollback
+          done
+
+      # Fails when a "down" section forgot something: the "up" sections would then hit
+      # an object that already exists.
+      - name: Apply every migration again
+        env:
+          IMAGE: ${{ steps.image-name.outputs.name }}:quality
+        run: docker run --rm --network host --env DATABASE_URL "${IMAGE}"
+
+      - name: Report the tested migrations
+        env:
+          POSTGRES_VERSION: ${{ inputs.postgres-version }}
+        run: |
+          {
+            echo '### 🗄️ Migrations testées'
+            echo
+            echo "${MIGRATION_COUNT} migration(s) appliquée(s), annulée(s) puis réappliquée(s) sur PostgreSQL ${POSTGRES_VERSION}."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  #=========#
+  # Release #
+  #=========#
+
+  prepare-release:
+    name: Prepare release
+    if: github.event_name != 'pull_request'
+    needs: quality
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-prepare-release.yml@main
+    with:
+      project-type: database
+
+  docker-image:
+    name: Docker image
+    needs: [quality, prepare-release]
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-docker-image.yml@main
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image-name: ${{ needs.quality.outputs.image-name }}
+      image-tag: ${{ needs.prepare-release.outputs.version }}
+      tag-latest: ${{ needs.prepare-release.outputs.kind == 'final' }}
+
+  publish-release:
+    name: Publish release
+    needs: [prepare-release, docker-image]
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-publish-release.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      kind: ${{ needs.prepare-release.outputs.kind }}
+      version: ${{ needs.prepare-release.outputs.version }}
+      tag: ${{ needs.prepare-release.outputs.tag }}
+      previous-tag: ${{ needs.prepare-release.outputs.previous-tag }}
+      new-release-branch: ${{ needs.prepare-release.outputs.new-release-branch }}

@@ -66,10 +66,12 @@ La version vient des messages de commit ajoutés depuis le dernier tag `vX.Y.Z`.
 
 ## Type de projet
 
-[detect-project.sh](scripts/detect-project.sh) lit les fichiers à la racine du projet et le suffixe du nom du dépôt. Il en tire la CI de type à lancer (`flutter`, `nodejs`, `astro` ou `extension`) et ce qu'elle publie (application, librairie ou extension). Les règles se lisent de haut en bas, la première qui correspond gagne :
+[detect-project.sh](scripts/detect-project.sh) lit les fichiers à la racine du projet et le suffixe du nom du dépôt. Il en tire la CI de type à lancer (`flutter`, `nodejs`, `astro`, `extension` ou `database`) et ce qu'elle publie (application, librairie, extension ou migrations). Les règles se lisent de haut en bas, la première qui correspond gagne :
 
 | Fichiers | Nom du dépôt | Résultat |
 |---|---|---|
+| `Dockerfile` | `…-database` | Migrations de base de données, quels que soient les autres fichiers |
+| Pas de `Dockerfile` | `…-database` | Refusé : les migrations sont publiées en image Docker |
 | `pubspec.yaml` | `…-lib` | Librairie Flutter. Un `Dockerfile` fait échouer la CI. |
 | `pubspec.yaml` | `…-app` | Application Flutter, mobile seulement s'il n'y a pas de `Dockerfile` |
 | `pubspec.yaml` | `…-extension` | Refusé : une extension navigateur se construit avec npm |
@@ -83,7 +85,7 @@ La version vient des messages de commit ajoutés depuis le dernier tag `vX.Y.Z`.
 | Ni l'un ni l'autre | — | Refusé |
 
 - `pubspec.yaml` passe avant `package.json` : un projet Flutter peut avoir un `package.json` pour ses outils (husky, commitlint…).
-- Le suffixe passe avant le `Dockerfile`.
+- Le suffixe passe avant le `Dockerfile`, et `-database` passe avant tout : un projet de base de données peut avoir un `package.json` pour ses outils.
 - Le suffixe est lu sur le nom normalisé (voir plus bas) : `FlorAccess_App` devient `floraccess-app`.
 - Un script npm nommé `astro` ne compte pas : seule la dépendance fait un site Astro. Une librairie de composants Astro (`…-lib`) reste une librairie npm.
 
@@ -94,7 +96,7 @@ La détection tourne à deux endroits :
 
 ## Ce qui est publié
 
-Le nom vient du dépôt, en minuscules, avec des tirets à la place des autres caractères : `FlorAccess` → `floraccess`, `My_API.Server` → `my-api-server`.
+Le nom vient du dépôt, en minuscules, avec des tirets à la place des autres caractères : `FlorAccess` → `floraccess`, `My_API.Server` → `my-api-server`. Seule exception : l'image d'un projet de base de données remplace le suffixe `-database` par `-migrations` (`econoris-database` → `econoris-migrations`), voir [database/README.md](../database/README.md).
 
 Ce que chaque type publie est décrit dans son README. Le tableau ci-dessous concerne une application publiée en image Docker.
 
@@ -212,11 +214,11 @@ Tests : `gitflow/tests/run-tests.sh`.
 | « main non mergée dans dev » | Merger la pull request de back-merge `main` → `dev` avant de relancer le bouton. |
 | « Release déjà en cours » | Publier ou abandonner la release en cours. |
 | « Rien à publier » | Aucun commit depuis la dernière version. |
-| « Projet non reconnu » | Ni `pubspec.yaml` ni `package.json` à la racine du projet. |
+| « Projet non reconnu » | Ni `pubspec.yaml` ni `package.json` à la racine du projet, et pas de suffixe `-database`. |
 | « Librairie avec un Dockerfile » | Un dépôt `…-lib` a un `Dockerfile` : le supprimer, ou renommer le dépôt en `…-app`. |
 | « Extension Flutter » | Un dépôt `…-extension` a un `pubspec.yaml` : une extension se construit avec npm. |
 | « Type de projet ambigu » | Un `package.json` sans `Dockerfile` ni suffixe : ajouter un `Dockerfile` (application), ou renommer le dépôt en `…-lib` ou `…-extension`. |
-| « Dockerfile manquant » | Une application Node.js ou Astro (`…-app`) n'a pas de `Dockerfile` à la racine. |
+| « Dockerfile manquant » | Une application Node.js ou Astro (`…-app`), ou un projet de base de données (`…-database`), n'a pas de `Dockerfile` à la racine. |
 | « Mauvaise CI de type » | Le `ci.yml` du projet appelle une CI de type qui n'est pas celle du type détecté, par exemple `nodejs.yml` pour un site Astro : appeler `auto.yml`, ou la bonne CI. |
 | Avertissement « Librairie Flutter sans suffixe » | Un `pubspec.yaml` sans `Dockerfile` ni suffixe est traité comme une librairie. Renommer le dépôt en `…-lib` pour le confirmer, ou en `…-app` si c'est une application mobile. |
 | Le bouton **Run workflow** n'apparaît pas | Le fichier `ci.yml` doit exister sur la branche par défaut du dépôt. |

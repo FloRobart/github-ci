@@ -9,7 +9,8 @@ name: Gitflow prepare release
 #   Push on main              →  final version vX.Y.Z
 #
 # It also tells the type CI what to build: an application (Docker image, Android…),
-# a library (npm package, pub.dev…) or a browser extension (archive, stores), see
+# a library (npm package, pub.dev…), a browser extension (archive, stores) or database
+# migrations (Docker image), see
 # gitflow/scripts/detect-project.sh. A project detected as another type than the
 # calling type CI stops the run.
 #
@@ -20,7 +21,7 @@ on:
   workflow_call:
     inputs:
       project-type:
-        description: Type CI calling this workflow, "flutter", "nodejs", "astro" or "extension". It must match the detected type.
+        description: Type CI calling this workflow, "flutter", "nodejs", "astro", "extension" or "database". It must match the detected type.
         type: string
         required: true
     outputs:
@@ -43,7 +44,7 @@ on:
         description: Repository name in lower case with hyphens, used for the Docker image and the release files.
         value: ${{ jobs.prepare.outputs.project-name }}
       project-kind:
-        description: '"application", "library" or "extension", see gitflow/scripts/detect-project.sh.'
+        description: '"application", "library", "extension" or "migrations", see gitflow/scripts/detect-project.sh.'
         value: ${{ jobs.prepare.outputs.project-kind }}
       has-dockerfile:
         description: '"true" when the project has a Dockerfile at its root.'
@@ -129,6 +130,7 @@ jobs:
             case "${PROJECT_KIND}" in
               library) echo "Type : librairie ${PROJECT_TYPE}" ;;
               extension) echo 'Type : extension navigateur' ;;
+              migrations) echo 'Type : migrations de base de données' ;;
               *) echo "Type : application ${PROJECT_TYPE}" ;;
             esac
             echo

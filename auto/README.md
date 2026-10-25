@@ -5,11 +5,12 @@ Le point d'entrée unique : **le même `ci.yml` dans tous les projets**. Il dét
 ```mermaid
 flowchart LR
     project["ci.yml du projet<br/>identique partout"] --> detect["Detect<br/>detect-project.sh"]
+    detect -- "-database + Dockerfile" --> database["database.yml"]
     detect -- "pubspec.yaml" --> flutter["flutter.yml"]
     detect -- "package.json + -extension" --> extension["extension.yml"]
     detect -- "package.json + astro + Dockerfile" --> astro["astro.yml"]
     detect -- "package.json" --> nodejs["nodejs.yml"]
-    flutter & extension & astro & nodejs --> gitflow["gitflow-*.yml"]
+    database & flutter & extension & astro & nodejs --> gitflow["gitflow-*.yml"]
 ```
 
 Le workflow est [.github/workflows/auto.yml](../.github/workflows/auto.yml). Il ne fait que choisir : toute la logique reste dans les CI de type et dans [gitflow](../gitflow/README.md).
@@ -24,6 +25,7 @@ Le workflow est [.github/workflows/auto.yml](../.github/workflows/auto.yml). Il 
 | `package.json` + `Dockerfile` + la dépendance `astro` | [Astro](../astro/README.md) | Image Docker |
 | `package.json` + un nom en `-extension` | [Extension](../extension/README.md) | Archive `.zip`, puis Chrome Web Store et addons.mozilla.org |
 | `package.json` + un nom en `-lib` | [Node.js](../nodejs/README.md), librairie | Paquet npm |
+| `Dockerfile` + un nom en `-database` | [Database](../database/README.md) | Image Docker des migrations, nommée `…-migrations` |
 
 Tous passent par le git flow. L'ordre exact des règles et les cas refusés (un `package.json` sans `Dockerfile` ni suffixe, par exemple) sont dans [gitflow/README.md → Type de projet](../gitflow/README.md#type-de-projet).
 
@@ -42,7 +44,7 @@ jobs:
     secrets: inherit
 ```
 
-- Le job doit garder l'identifiant `ci`. Les quatre jobs de type d'`auto.yml` s'appellent tous **Project**, si bien que les vérifications ont le même nom quel que soit le type : `ci / Project / Gitflow / Checks` et `ci / Project / Quality`. C'est ce qu'attend le ruleset.
+- Le job doit garder l'identifiant `ci`. Les cinq jobs de type d'`auto.yml` s'appellent tous **Project**, si bien que les vérifications ont le même nom quel que soit le type : `ci / Project / Gitflow / Checks` et `ci / Project / Quality`. C'est ce qu'attend le ruleset.
 - Le fichier d'exemple donne **toutes** les permissions, `id-token: write` compris, même à un projet Flutter : GitHub vérifie les permissions de chaque CI de type avant de lancer le run, y compris celles qui ne tourneront pas.
 
 ## Options
@@ -57,6 +59,7 @@ Toutes facultatives. Chacune est transmise à la CI de type qui s'en sert, les a
 | `docker-image` | `true` | Flutter | `false` pour ne pas publier l'image web malgré le `Dockerfile` |
 | `android` | `true` | Flutter | `false` pour une application uniquement web |
 | `google-play-track` | `production` | Flutter | Piste Google Play d'une version finale : `production`, `beta`, `alpha` ou `internal` |
+| `postgres-version` | `18` | Database | Version de PostgreSQL sur laquelle les migrations sont testées |
 
 Une option rend le `ci.yml` différent des autres projets : ne l'ajouter que si la valeur par défaut ne convient pas.
 
@@ -71,7 +74,7 @@ jobs:
 
 ## Importer une CI de type directement
 
-Reste possible, avec le `ci.yml` d'exemple de chaque type ([nodejs](../nodejs/example/ci.yml), [astro](../astro/example/ci.yml), [flutter](../flutter/example/ci.yml), [extension](../extension/example/ci.yml)). Deux différences :
+Reste possible, avec le `ci.yml` d'exemple de chaque type ([nodejs](../nodejs/example/ci.yml), [astro](../astro/example/ci.yml), [flutter](../flutter/example/ci.yml), [extension](../extension/example/ci.yml), [database](../database/example/ci.yml)). Deux différences :
 
 - Les vérifications n'ont pas le niveau `Project` : `ci / Gitflow / Checks` et `ci / Quality`. Importer alors [protected-branches-type-ci.json](../gitflow/rulesets/protected-branches-type-ci.json) à la place de `protected-branches.json`.
 - La détection tourne quand même au moment de la release : une CI de type refuse de publier un projet détecté comme un autre type (« Mauvaise CI de type »).
