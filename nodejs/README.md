@@ -12,15 +12,16 @@ Le workflow est [.github/workflows/nodejs.yml](../.github/workflows/nodejs.yml).
 
 ## Application ou librairie
 
-Le type se lit dans le nom du dépôt, et le `Dockerfile` doit aller avec :
+Un projet Node.js a un `package.json` à la racine, sans `pubspec.yaml`. Le reste se lit dans le nom du dépôt et le `Dockerfile` :
 
-| Nom du dépôt | Type | Dockerfile | Publié |
+| Nom du dépôt | Dockerfile | Type | Publié |
 |---|---|---|---|
-| `mon-projet-app` | Application | Obligatoire | Image Docker |
-| `mon-projet-lib` | Librairie | Interdit | Paquet npm |
-| Sans suffixe | Déduit du Dockerfile, avec un avertissement | — | Selon le cas |
+| `mon-projet-lib` | Interdit | Librairie | Paquet npm |
+| `mon-projet-app` ou sans suffixe | Présent | Application | Image Docker |
+| `mon-projet-app` | Absent | Refusé (« Dockerfile manquant ») | — |
+| Sans suffixe | Absent | Refusé (« Type de projet ambigu ») | — |
 
-Un nom sans suffixe reste accepté pour les projets créés avant cette convention : avec un `Dockerfile` c'est une application, sans c'est une librairie.
+Un projet avec un `Dockerfile` qui dépend d'`astro` est un site [Astro](../astro/README.md), et un `…-extension` une [extension navigateur](../extension/README.md) : ils ont leur propre CI. Toutes les règles sont dans [gitflow/README.md → Type de projet](../gitflow/README.md#type-de-projet).
 
 ## Prérequis du projet
 
@@ -54,15 +55,19 @@ Un nom sans suffixe reste accepté pour les projets créés avant cette conventi
 ### Librairie
 
 - Pas de `Dockerfile`.
-- Un script `build` dans `package.json`, lancé juste avant la publication, par exemple `"build": "tsc"`.
+- Un script `build` dans `package.json`, lancé par la qualité puis juste avant la publication, par exemple `"build": "tsc"`.
 - Un nom scopé au propriétaire du dépôt, en minuscules : `@florobart/mon-projet`. GitHub Packages refuse tout autre nom.
 - Les champs habituels d'un paquet : `main` ou `exports`, `types`, `files` (ce qui part dans le paquet), et `repository`, qui relie le paquet au dépôt sur GitHub.
 - La version de `package.json` n'a pas d'importance : la CI la remplace par la version calculée, sans rien commiter.
 
 ## Installation
 
+Le plus simple : le `ci.yml` commun à tous les projets, qui détecte un projet Node.js tout seul. Voir [auto/README.md](../auto/README.md).
+
+Pour appeler directement cette CI :
+
 1. Copier [example/ci.yml](example/ci.yml) dans le projet, sous `.github/workflows/ci.yml`, sur `dev` et sur `main`.
-2. Faire les réglages du dépôt : [gitflow/README.md → Installer dans un projet](../gitflow/README.md#installer-dans-un-projet).
+2. Faire les réglages du dépôt, avec le ruleset `protected-branches-type-ci.json` : [gitflow/README.md → Installer dans un projet](../gitflow/README.md#installer-dans-un-projet).
 
 ```yaml
 jobs:
@@ -71,7 +76,7 @@ jobs:
     secrets: inherit
 ```
 
-Le job doit garder l'identifiant `ci` : les rulesets attendent les vérifications `ci / Gitflow / Checks` et `ci / Quality`.
+Le job doit garder l'identifiant `ci` : le ruleset attend les vérifications `ci / Gitflow / Checks` et `ci / Quality`.
 
 Le fichier d'exemple donne la permission `id-token: write`. Elle sert au trusted publishing npm d'une librairie, mais **tout projet Node.js doit l'avoir**, application comprise : GitHub refuse de lancer le workflow si la permission demandée par le job `npm package` n'est pas accordée par le `ci.yml`, même quand ce job ne tourne pas.
 
@@ -92,13 +97,18 @@ jobs:
 
 ## Le job qualité
 
-Le même pour une application et une librairie, sur chaque pull request et avant chaque publication :
+Le même pour une application et une librairie, au build près, sur chaque pull request et avant chaque publication :
 
 1. `npm ci`
 2. `npm run lint`
 3. `npm run format:check`
 4. `npm run typecheck`
 5. `npm test`
+6. Le build de ce que la release publie, sans le publier :
+   - application : l'image Docker, construite depuis le `Dockerfile` mais jamais poussée ;
+   - librairie : `npm run build`.
+
+Un `Dockerfile` ou un build cassé est donc vu dans la pull request, et pas au moment de la release.
 
 ## Le paquet npm
 

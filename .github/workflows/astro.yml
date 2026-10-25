@@ -2,14 +2,19 @@ name: Astro
 
 # Reusable workflow (owner: astro/): the CI of an Astro website, gitflow included.
 #
-#   Pull request           →  gitflow checks + quality (lint, astro check, tests, build)
+#   Pull request           →  gitflow checks + quality (lint, format, astro check, tests, build, Docker image)
 #   Button (Run workflow)  →  quality, then release candidate: Docker image + GitHub pre-release
 #   Merge on main          →  quality, then final version: Docker image + GitHub Release
 #
+# An Astro website is a project with a package.json that depends on "astro" and a
+# Dockerfile (gitflow/scripts/detect-project.sh). Any other project stops the release.
+#
 # Only the quality job is specific to Astro: every gitflow step comes from the
-# gitflow-*.yml workflows. Unlike a Node.js API, the site is also built during the
-# quality job: "astro build" finds errors that "astro check" does not (broken
-# content collections, failing pages). See astro/README.md for the project requirements.
+# gitflow-*.yml workflows. The site is also built during the quality job: "astro build"
+# finds errors that "astro check" does not (broken content collections, failing pages).
+# The Docker image is then built from the Dockerfile, without being pushed, so a broken
+# Dockerfile is seen in the pull request rather than at release time.
+# See astro/README.md for the project requirements.
 
 on:
   workflow_call:
@@ -41,7 +46,8 @@ jobs:
   quality:
     name: Quality
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The Docker image can take a while to build.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout the project
@@ -62,6 +68,10 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Only checks: the CI never rewrites the code, the developer runs the formatter.
+      - name: Check the formatting
+        run: npm run format:check
+
       - name: Check the types (astro check)
         run: npm run typecheck
 
@@ -70,6 +80,21 @@ jobs:
 
       - name: Build the site
         run: npm run build
+
+      # An Astro website always has a Dockerfile (gitflow/scripts/detect-project.sh):
+      # unlike nodejs.yml, no detection is needed before building its image.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Same build as gitflow-docker-image.yml, but nothing is pushed. The cache it
+      # leaves speeds up the build of the release.
+      - name: Build the Docker image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   #=========#
   # Release #
@@ -80,6 +105,8 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: quality
     uses: FloRobart/Github-ci/.github/workflows/gitflow-prepare-release.yml@main
+    with:
+      project-type: astro
 
   docker-image:
     name: Docker image

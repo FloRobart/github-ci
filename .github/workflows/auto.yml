@@ -1,0 +1,156 @@
+name: Auto
+
+# Reusable workflow (owner: auto/): the single entry point shared by every project. It
+# detects what the project is, then runs the CI of its type, gitflow included.
+#
+#   pubspec.yaml                                  →  flutter.yml    (application or library)
+#   package.json, name ending with "-extension"   →  extension.yml
+#   package.json, "astro" dependency, Dockerfile  →  astro.yml
+#   package.json                                  →  nodejs.yml     (application or library)
+#
+# The full rules are in gitflow/scripts/detect-project.sh. Each type CI stays usable on
+# its own: this workflow only picks one of them, and forwards its options.
+#
+# Every type job has the same name, "Project", so the checks keep the same names whatever
+# the type: "ci / Project / Gitflow / Checks" and "ci / Project / Quality", as expected by
+# gitflow/rulesets/protected-branches.json.
+#
+# No concurrency here: each type CI declares its own, and the same group declared twice
+# in one run would wait for itself.
+#
+# Every permission of every type CI must be granted by the ci.yml of the project, even
+# the ones of the type CIs that do not run: GitHub checks them before starting the run.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version (Node.js, Astro and extension projects).
+        type: string
+        default: '24'
+      distribution-directory:
+        description: Directory produced by "npm run build", holding the manifest.json (extension projects).
+        type: string
+        default: dist
+      flutter-version:
+        description: Flutter version, empty for the latest stable version (Flutter projects).
+        type: string
+        default: ''
+      docker-image:
+        description: Publishes the web version of a Flutter application as a Docker image, when it has a Dockerfile (Flutter projects).
+        type: boolean
+        default: true
+      android:
+        description: Builds the Android version of a Flutter application (Flutter projects).
+        type: boolean
+        default: true
+      google-play-track:
+        description: Google Play track receiving a final version (Flutter projects).
+        type: string
+        default: production
+
+permissions:
+  contents: read
+
+jobs:
+  #===========#
+  # Detection #
+  #===========#
+
+  detect:
+    name: Detect
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      type: ${{ steps.project.outputs.type }}
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load the gitflow scripts
+        uses: FloRobart/Github-ci/gitflow/scripts@main
+
+      - name: Detect the project
+        id: project
+        env:
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: |
+          project_name=$(to-image-name.sh "${REPOSITORY_NAME}")
+          detect-project.sh "${project_name}" >> "${GITHUB_OUTPUT}"
+
+      - name: Report the detected project
+        env:
+          PROJECT_TYPE: ${{ steps.project.outputs.type }}
+          PROJECT_KIND: ${{ steps.project.outputs.kind }}
+        run: |
+          {
+            echo '### 🔎 Projet détecté'
+            echo
+            echo "CI \`${PROJECT_TYPE}.yml\`, projet de type « ${PROJECT_KIND} »."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  #==========#
+  # Type CIs #
+  #==========#
+
+  # Exactly one of these jobs runs. Each one grants only what its type CI needs.
+
+  flutter:
+    name: Project
+    needs: detect
+    if: needs.detect.outputs.type == 'flutter'
+    uses: FloRobart/Github-ci/.github/workflows/flutter.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    with:
+      flutter-version: ${{ inputs.flutter-version }}
+      docker-image: ${{ inputs.docker-image }}
+      android: ${{ inputs.android }}
+      google-play-track: ${{ inputs.google-play-track }}
+
+  nodejs:
+    name: Project
+    needs: detect
+    if: needs.detect.outputs.type == 'nodejs'
+    uses: FloRobart/Github-ci/.github/workflows/nodejs.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+      id-token: write
+    with:
+      node-version: ${{ inputs.node-version }}
+
+  astro:
+    name: Project
+    needs: detect
+    if: needs.detect.outputs.type == 'astro'
+    uses: FloRobart/Github-ci/.github/workflows/astro.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    with:
+      node-version: ${{ inputs.node-version }}
+
+  extension:
+    name: Project
+    needs: detect
+    if: needs.detect.outputs.type == 'extension'
+    uses: FloRobart/Github-ci/.github/workflows/extension.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      node-version: ${{ inputs.node-version }}
+      distribution-directory: ${{ inputs.distribution-directory }}

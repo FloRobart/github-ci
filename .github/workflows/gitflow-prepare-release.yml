@@ -8,14 +8,21 @@ name: Gitflow prepare release
 #   Button on hotfix/*        →  next release candidate of the hotfix
 #   Push on main              →  final version vX.Y.Z
 #
-# It also tells the type CI what to build: an application (Docker image, Android…)
-# or a library (npm package…), see gitflow/scripts/detect-project-kind.sh.
+# It also tells the type CI what to build: an application (Docker image, Android…),
+# a library (npm package, pub.dev…) or a browser extension (archive, stores), see
+# gitflow/scripts/detect-project.sh. A project detected as another type than the
+# calling type CI stops the run.
 #
 # Nothing is written here: the version is only computed and checked. The release is
 # published by gitflow-publish-release.yml, once every build has succeeded.
 
 on:
   workflow_call:
+    inputs:
+      project-type:
+        description: Type CI calling this workflow, "flutter", "nodejs", "astro" or "extension". It must match the detected type.
+        type: string
+        required: true
     outputs:
       kind:
         description: '"candidate" or "final".'
@@ -36,7 +43,7 @@ on:
         description: Repository name in lower case with hyphens, used for the Docker image and the release files.
         value: ${{ jobs.prepare.outputs.project-name }}
       project-kind:
-        description: '"application" (name ending with "-app") or "library" (name ending with "-lib").'
+        description: '"application", "library" or "extension", see gitflow/scripts/detect-project.sh.'
         value: ${{ jobs.prepare.outputs.project-kind }}
       has-dockerfile:
         description: '"true" when the project has a Dockerfile at its root.'
@@ -58,8 +65,8 @@ jobs:
       previous-tag: ${{ steps.plan.outputs.previous-tag }}
       new-release-branch: ${{ steps.plan.outputs.new-release-branch }}
       project-name: ${{ steps.project-name.outputs.name }}
-      project-kind: ${{ steps.project-kind.outputs.kind }}
-      has-dockerfile: ${{ steps.project-kind.outputs.has-dockerfile }}
+      project-kind: ${{ steps.project.outputs.kind }}
+      has-dockerfile: ${{ steps.project.outputs.has-dockerfile }}
 
     steps:
       # The whole history, every branch and every tag are needed to compute the version.
@@ -87,27 +94,43 @@ jobs:
           project_name=$(to-image-name.sh "${REPOSITORY_NAME}")
           echo "name=${project_name}" >> "${GITHUB_OUTPUT}"
 
-      - name: Detect the project kind
-        id: project-kind
+      - name: Detect the project
+        id: project
         env:
           PROJECT_NAME: ${{ steps.project-name.outputs.name }}
-        run: detect-project-kind.sh "${PROJECT_NAME}" >> "${GITHUB_OUTPUT}"
+        run: detect-project.sh "${PROJECT_NAME}" >> "${GITHUB_OUTPUT}"
+
+      # Without this check, a project wired to the wrong type CI would publish a wrong or
+      # empty release: a "-extension" project on nodejs.yml builds neither image nor package.
+      # auto.yml always picks the right type CI: only a direct import can fail here.
+      - name: Check the type CI matches the project
+        env:
+          DETECTED_TYPE: ${{ steps.project.outputs.type }}
+          CALLING_TYPE: ${{ inputs.project-type }}
+        run: |
+          if [ "${DETECTED_TYPE}" = "${CALLING_TYPE}" ]; then
+            exit 0
+          fi
+
+          echo "::error title=Mauvaise CI de type::Ce projet est détecté comme « ${DETECTED_TYPE} », mais il passe par la CI « ${CALLING_TYPE} ». Dans le ci.yml du projet, appelez auto.yml, qui choisit la bonne CI, ou ${DETECTED_TYPE}.yml."
+          exit 1
 
       - name: Report the plan
         env:
           TAG: ${{ steps.plan.outputs.tag }}
           NEW_RELEASE_BRANCH: ${{ steps.plan.outputs.new-release-branch }}
           PROJECT_NAME: ${{ steps.project-name.outputs.name }}
-          PROJECT_KIND: ${{ steps.project-kind.outputs.kind }}
+          PROJECT_TYPE: ${{ steps.project.outputs.type }}
+          PROJECT_KIND: ${{ steps.project.outputs.kind }}
         run: |
           {
             echo "### 🚀 ${PROJECT_NAME} ${TAG}"
             echo
-            if [ "${PROJECT_KIND}" = 'library' ]; then
-              echo 'Type : librairie'
-            else
-              echo 'Type : application'
-            fi
+            case "${PROJECT_KIND}" in
+              library) echo "Type : librairie ${PROJECT_TYPE}" ;;
+              extension) echo 'Type : extension navigateur' ;;
+              *) echo "Type : application ${PROJECT_TYPE}" ;;
+            esac
             echo
             if [ -n "${NEW_RELEASE_BRANCH}" ]; then
               echo "Branche de release à créer : \`${NEW_RELEASE_BRANCH}\`"

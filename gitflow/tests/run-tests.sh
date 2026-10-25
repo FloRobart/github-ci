@@ -101,19 +101,79 @@ test_image_name() {
     assert_fails 'nom vide refusé' to-image-name.sh '___'
 }
 
-test_project_kind() {
-    echo 'detect-project-kind.sh'
-    mkdir "${WORKING_DIRECTORY}/project-kind"
-    cd "${WORKING_DIRECTORY}/project-kind"
+# Creates a new directory holding the given empty files, then moves into it.
+move_into_new_project() {
+    local project_directory
+    project_directory=$(mktemp -d "${WORKING_DIRECTORY}/project-XXXX")
+    cd "${project_directory}"
 
-    assert_equals 'suffixe -app sans Dockerfile : application mobile' "$(printf '%s\n' kind=application has-dockerfile=false)" "$(detect-project-kind.sh 'floraccess-app')"
-    assert_equals 'suffixe -lib : librairie' "$(printf '%s\n' kind=library has-dockerfile=false)" "$(detect-project-kind.sh 'date-utils-lib')"
-    assert_equals 'sans suffixe ni Dockerfile : librairie' "$(printf '%s\n' kind=library has-dockerfile=false)" "$(detect-project-kind.sh 'floraccess' 2> /dev/null)"
+    local file_name
+    for file_name in "$@"; do
+        touch "${file_name}"
+    done
+}
 
-    touch Dockerfile
-    assert_equals 'suffixe -app avec Dockerfile : application' "$(printf '%s\n' kind=application has-dockerfile=true)" "$(detect-project-kind.sh 'floraccess-app')"
-    assert_equals 'sans suffixe avec Dockerfile : application' "$(printf '%s\n' kind=application has-dockerfile=true)" "$(detect-project-kind.sh 'floraccess' 2> /dev/null)"
-    assert_fails 'suffixe -lib avec Dockerfile refusé' detect-project-kind.sh 'date-utils-lib'
+# Prints the output expected from detect-project.sh.
+expected_project() {
+    local type="$1"
+    local kind="$2"
+    local has_dockerfile="$3"
+
+    printf '%s\n' "type=${type}" "kind=${kind}" "has-dockerfile=${has_dockerfile}"
+}
+
+test_flutter_project_detection() {
+    echo 'detect-project.sh : Flutter'
+
+    move_into_new_project pubspec.yaml
+    assert_equals '-lib : librairie' "$(expected_project flutter library false)" "$(detect-project.sh 'date-utils-lib')"
+    assert_equals '-app sans Dockerfile : application mobile' "$(expected_project flutter application false)" "$(detect-project.sh 'floraccess-app')"
+    assert_equals 'sans suffixe ni Dockerfile : librairie' "$(expected_project flutter library false)" "$(detect-project.sh 'date-utils' 2> /dev/null)"
+    assert_fails '-extension refusé' detect-project.sh 'tab-saver-extension'
+
+    move_into_new_project pubspec.yaml Dockerfile
+    assert_equals 'sans suffixe avec Dockerfile : application' "$(expected_project flutter application true)" "$(detect-project.sh 'floraccess')"
+    assert_equals '-app avec Dockerfile : application' "$(expected_project flutter application true)" "$(detect-project.sh 'floraccess-app')"
+    assert_fails '-lib avec Dockerfile refusé' detect-project.sh 'date-utils-lib'
+
+    move_into_new_project pubspec.yaml package.json
+    assert_equals 'pubspec.yaml prioritaire sur package.json' "$(expected_project flutter application false)" "$(detect-project.sh 'floraccess-app')"
+}
+
+test_node_project_detection() {
+    echo 'detect-project.sh : Node.js'
+
+    move_into_new_project package.json
+    assert_equals '-extension : extension' "$(expected_project extension extension false)" "$(detect-project.sh 'tab-saver-extension')"
+    assert_equals '-lib : librairie' "$(expected_project nodejs library false)" "$(detect-project.sh 'date-utils-lib')"
+    assert_fails '-app sans Dockerfile refusé' detect-project.sh 'floraccess-app'
+    assert_fails 'sans suffixe ni Dockerfile refusé' detect-project.sh 'floraccess'
+
+    move_into_new_project package.json Dockerfile
+    assert_equals '-extension avec Dockerfile : extension' "$(expected_project extension extension true)" "$(detect-project.sh 'tab-saver-extension')"
+    assert_equals 'sans suffixe avec Dockerfile : application' "$(expected_project nodejs application true)" "$(detect-project.sh 'floraccess')"
+    assert_equals '-app avec Dockerfile : application' "$(expected_project nodejs application true)" "$(detect-project.sh 'floraccess-app')"
+    assert_fails '-lib avec Dockerfile refusé' detect-project.sh 'date-utils-lib'
+
+    echo '{ "scripts": { "astro": "astro" } }' > package.json
+    assert_equals 'script « astro » sans dépendance : application Node.js' "$(expected_project nodejs application true)" "$(detect-project.sh 'floraccess')"
+
+    echo '{ "dependencies": { "astro": "^5.0.0" } }' > package.json
+    assert_equals 'dépendance astro : site Astro' "$(expected_project astro application true)" "$(detect-project.sh 'portfolio')"
+
+    echo '{ "devDependencies": { "astro": "^5.0.0" } }' > package.json
+    assert_equals 'dépendance de développement astro : site Astro' "$(expected_project astro application true)" "$(detect-project.sh 'portfolio-app')"
+
+    move_into_new_project package.json
+    echo '{ "dependencies": { "astro": "^5.0.0" } }' > package.json
+    assert_equals 'librairie de composants Astro : librairie npm' "$(expected_project nodejs library false)" "$(detect-project.sh 'astro-components-lib')"
+}
+
+test_unknown_project_detection() {
+    echo 'detect-project.sh : autres projets'
+
+    move_into_new_project Dockerfile
+    assert_fails 'ni pubspec.yaml ni package.json refusé' detect-project.sh 'floraccess-app'
 }
 
 test_pull_request_branches() {
@@ -243,7 +303,9 @@ test_plan_release() {
 }
 
 test_image_name
-test_project_kind
+test_flutter_project_detection
+test_node_project_detection
+test_unknown_project_detection
 test_pull_request_branches
 test_commit_messages
 test_next_version

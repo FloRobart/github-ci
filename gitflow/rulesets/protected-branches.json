@@ -34,11 +34,11 @@
         "do_not_enforce_on_create": false,
         "required_status_checks": [
           {
-            "context": "ci / Gitflow / Checks",
+            "context": "ci / Project / Gitflow / Checks",
             "integration_id": 15368
           },
           {
-            "context": "ci / Quality",
+            "context": "ci / Project / Quality",
             "integration_id": 15368
           }
         ]

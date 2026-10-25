@@ -2,17 +2,22 @@ name: Node.js
 
 # Reusable workflow (owner: nodejs/): the CI of a Node.js project, gitflow included.
 #
-#   Pull request           →  gitflow checks + quality (lint, format, type check, tests)
+#   Pull request           →  gitflow checks + quality (lint, format, type check, tests, build)
 #   Button (Run workflow)  →  quality, then release candidate: Docker image or npm package + GitHub pre-release
 #   Merge on main          →  quality, then final version: Docker image or npm package + GitHub Release
 #
-# What is published depends on the project kind (gitflow/scripts/detect-project-kind.sh):
+# What is published depends on the project kind (gitflow/scripts/detect-project.sh):
 #
-#   Application ("-app", with a Dockerfile)  →  Docker image
-#   Library ("-lib", no Dockerfile)          →  npm package, on GitHub Packages and on npmjs.com
+#   Application (a Dockerfile, no "astro" dependency)  →  Docker image
+#   Library ("-lib", no Dockerfile)                    →  npm package, on GitHub Packages and on npmjs.com
 #
 # The quality job is the same for an application and a library: both are installed,
-# linted, format checked, type checked and tested before any release.
+# linted, format checked, type checked and tested before any release. It ends by
+# building what the release publishes, without publishing it, so a broken build is
+# seen in the pull request rather than at release time:
+#
+#   Application  →  Docker image built from the Dockerfile, never pushed
+#   Library      →  "npm run build"
 #
 # Only the quality and npm package jobs are specific to Node.js: every gitflow step
 # comes from the gitflow-*.yml workflows. See nodejs/README.md for the project requirements.
@@ -50,7 +55,8 @@ jobs:
   quality:
     name: Quality
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The Docker image of an application can take a while to build.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout the project
@@ -81,6 +87,37 @@ jobs:
       - name: Run the tests
         run: npm test
 
+      # The project kind tells what the release publishes, so what must be built here.
+      - name: Load the gitflow scripts
+        uses: FloRobart/Github-ci/gitflow/scripts@main
+
+      - name: Detect the project
+        id: project
+        env:
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: |
+          project_name=$(to-image-name.sh "${REPOSITORY_NAME}")
+          detect-project.sh "${project_name}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build the library
+        if: steps.project.outputs.kind == 'library'
+        run: npm run build
+
+      - name: Set up Docker Buildx
+        if: steps.project.outputs.kind == 'application'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Same build as gitflow-docker-image.yml, but nothing is pushed. The cache it
+      # leaves speeds up the build of the release.
+      - name: Build the Docker image
+        if: steps.project.outputs.kind == 'application'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   #=========#
   # Release #
   #=========#
@@ -90,6 +127,8 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: quality
     uses: FloRobart/Github-ci/.github/workflows/gitflow-prepare-release.yml@main
+    with:
+      project-type: nodejs
 
   docker-image:
     name: Docker image

@@ -2,27 +2,39 @@
 
 La CI de mes projets : git flow imposé, qualité vérifiée à chaque pull request, release candidates à la demande et versions finales publiées au merge sur `main`. Le déploiement reste manuel.
 
-Un projet l'importe avec **un seul fichier** de quelques lignes. Toute la logique reste ici.
+Un projet l'importe avec **un seul fichier** de quelques lignes, **le même pour tous les projets** : la CI détecte toute seule de quel type de projet il s'agit. Toute la logique reste ici.
 
-## Les trois niveaux
+## Les quatre niveaux
 
 ```mermaid
 flowchart LR
-    project["Projet<br/>.github/workflows/ci.yml"] --> type["CI du type<br/>nodejs.yml · astro.yml · flutter.yml"]
+    project["Projet<br/>.github/workflows/ci.yml"] --> auto["Détection<br/>auto.yml"]
+    auto --> type["CI du type<br/>nodejs.yml · astro.yml · flutter.yml · extension.yml"]
     type --> gitflow["CI globale<br/>gitflow-*.yml"]
 ```
 
 | Niveau | Rôle | Dossier |
 |---|---|---|
-| **Projet** | Choisit son type et rien d'autre | Fichier d'exemple dans `<type>/example/ci.yml` |
-| **Type** | Ce qui dépend de la techno : installation, lint, types, tests, build Android, paquet npm… | [nodejs/](nodejs/), [astro/](astro/), [flutter/](flutter/) |
-| **Gitflow** | Ce qui est commun à tous : règles de branches, messages de commit, version, application ou librairie, image Docker, GitHub Release, back-merge | [gitflow/](gitflow/) |
+| **Projet** | Le même `ci.yml` partout, qui appelle `auto.yml` | [auto/example/ci.yml](auto/example/ci.yml) |
+| **Auto** | Détecte le type du projet et lance la CI de ce type | [auto/](auto/) |
+| **Type** | Ce qui dépend de la techno : installation, lint, types, tests, build Android, Google Play, paquet npm ou pub.dev, stores d'extensions… | [nodejs/](nodejs/), [astro/](astro/), [flutter/](flutter/), [extension/](extension/) |
+| **Gitflow** | Ce qui est commun à tous : règles de branches, messages de commit, version, détection du type, image Docker, GitHub Release, back-merge | [gitflow/](gitflow/) |
 
-Chaque type branche les mêmes briques gitflow dans le même ordre. Ajouter un type, c'est écrire son job `quality` et recopier ce câblage.
+Chaque niveau reste utilisable seul : un projet peut appeler directement une CI de type, et une CI de type appelle les briques gitflow. Chaque type branche les mêmes briques gitflow dans le même ordre. Ajouter un type, c'est écrire son job `quality`, recopier ce câblage, puis ajouter sa règle à la détection et son job à `auto.yml`.
 
-## Application ou librairie
+## Type de projet
 
-Le nom du dépôt dit ce qu'est le projet : `mon-projet-app` est une application, `mon-projet-lib` une librairie. Une application est publiée en image Docker (et en APK/AAB pour Flutter), une librairie en paquet npm pour Node.js, ou par son seul tag git pour Flutter. Le détail est dans [gitflow/README.md → Application ou librairie](gitflow/README.md#application-ou-librairie).
+Les fichiers à la racine et le suffixe du nom du dépôt disent ce qu'est le projet :
+
+| Le projet a… | Type | Publié |
+|---|---|---|
+| `pubspec.yaml` + `Dockerfile`, ou un nom en `-app` | Application Flutter | Image Docker (avec un `Dockerfile`), APK de debug, ou APK et AAB signés puis Google Play s'il y a les secrets |
+| `pubspec.yaml` seul, ou un nom en `-lib` | Librairie Flutter | GitHub Release, puis pub.dev |
+| `package.json` + `Dockerfile` | Application Node.js, ou site Astro avec la dépendance `astro` | Image Docker |
+| `package.json` + un nom en `-extension` | Extension navigateur | Archive `.zip`, puis Chrome Web Store et addons.mozilla.org |
+| `package.json` + un nom en `-lib` | Librairie Node.js | Paquet npm |
+
+Les règles exactes et les cas refusés sont dans [gitflow/README.md → Type de projet](gitflow/README.md#type-de-projet).
 
 ## Le flux
 
@@ -40,21 +52,23 @@ flowchart LR
 | Moment | Ce qui se passe |
 |---|---|
 | Pull request | Règles du git flow, messages de commit (Conventional Commits), qualité du type |
-| Bouton **Run workflow** sur `dev` | Qualité, puis release candidate `vX.Y.Z-rc.1` : image Docker ou paquet, pre-release GitHub, branche `release/vX.Y.Z` et sa pull request vers `main` |
+| Bouton **Run workflow** sur `dev` | Qualité, puis release candidate `vX.Y.Z-rc.1` : image Docker, paquet ou fichiers de l'application, pre-release GitHub, branche `release/vX.Y.Z` et sa pull request vers `main` |
 | Bouton sur `release/vX.Y.Z` ou `hotfix/*` | Qualité, puis release candidate suivante `vX.Y.Z-rc.N` |
-| Merge sur `main` | Qualité, puis version finale `vX.Y.Z` : image Docker `X.Y.Z` + `latest` ou paquet, GitHub Release, pull request de back-merge `main` → `dev` |
+| Merge sur `main` | Qualité, puis version finale `vX.Y.Z` : image Docker `X.Y.Z` + `latest`, paquet ou fichiers de l'application, GitHub Release, pull request de back-merge `main` → `dev`, puis envoi aux stores (Google Play, pub.dev, Chrome Web Store, addons.mozilla.org) dont les secrets existent |
 
 Les détails (règles, calcul de version, réglages du dépôt) sont dans [gitflow/README.md](gitflow/README.md).
 
 ## Installer dans un projet
 
-1. Suivre le README du type : [Node.js](nodejs/README.md), [Astro](astro/README.md) ou [Flutter](flutter/README.md).
-2. Faire les réglages du dépôt, une fois par projet : [gitflow/README.md → Installer dans un projet](gitflow/README.md#installer-dans-un-projet).
+1. Copier [auto/example/ci.yml](auto/example/ci.yml) dans le projet, sous `.github/workflows/ci.yml` : voir [auto/README.md](auto/README.md).
+2. Suivre les prérequis du README du type : [Node.js](nodejs/README.md), [Astro](astro/README.md), [Flutter](flutter/README.md) ou [Extension](extension/README.md).
+3. Faire les réglages du dépôt, une fois par projet : [gitflow/README.md → Installer dans un projet](gitflow/README.md#installer-dans-un-projet).
 
 ## Organisation de ce dépôt
 
 ```text
 .github/workflows/          Workflows réutilisables (GitHub impose cet emplacement)
+├── auto.yml                     → appartient à auto/
 ├── gitflow-checks.yml           ┐
 ├── gitflow-prepare-release.yml  │ appartiennent à gitflow/
 ├── gitflow-docker-image.yml     │
@@ -62,12 +76,13 @@ Les détails (règles, calcul de version, réglages du dépôt) sont dans [gitfl
 ├── nodejs.yml                   → appartient à nodejs/
 ├── astro.yml                    → appartient à astro/
 ├── flutter.yml                  → appartient à flutter/
+├── extension.yml                → appartient à extension/
 └── self-tests.yml               → CI de ce dépôt, jamais appelée par les projets
 gitflow/
-├── scripts/                La logique du git flow, en bash, testable en local
+├── scripts/                La logique du git flow et la détection du type, en bash, testables en local
 ├── tests/                  Tests des scripts
 └── rulesets/               Protections de branches à importer dans chaque projet
-nodejs/ · astro/ · flutter/
+auto/ · nodejs/ · astro/ · flutter/ · extension/
 └── example/                Fichiers à copier dans un projet
 archive/                    Anciennes versions, conservées pour mémoire
 ```
@@ -86,7 +101,7 @@ archive/                    Anciennes versions, conservées pour mémoire
 gitflow/tests/run-tests.sh
 ```
 
-Les tests créent des dépôts git jetables et vérifient le calcul de version, les règles de branches, les messages de commit et le plan de release. Ils n'ont besoin ni de réseau ni de GitHub.
+Les tests créent des dépôts git et des projets jetables, et vérifient la détection du type de projet, le calcul de version, les règles de branches, les messages de commit et le plan de release. Ils n'ont besoin ni de réseau ni de GitHub, seulement de `jq`.
 
 Lint, avec [shellcheck](https://github.com/koalaman/shellcheck) et [actionlint](https://github.com/rhysd/actionlint) installés :
 
@@ -100,13 +115,13 @@ actionlint .github/workflows/*.yml ./*/example/ci.yml
 
 [self-tests.yml](.github/workflows/self-tests.yml) lance ces trois contrôles sur chaque pull request de ce dépôt et sur `main`. Il n'a pas de `workflow_call` : les projets qui importent Github-ci ne le lancent jamais. Il teste le code de la pull request elle-même, jamais la version `@main`.
 
-Ne sont pas couverts : l'enchaînement réel des workflows réutilisables appelés par un projet, et les scripts qui écrivent sur GitHub (`create-branch.sh`, `open-pull-request.sh`, `create-github-release.sh`). Seul un vrai projet de test les vérifie.
+Ne sont pas couverts : l'enchaînement réel des workflows réutilisables appelés par un projet, les scripts qui écrivent sur GitHub (`create-branch.sh`, `open-pull-request.sh`, `create-github-release.sh`) et les envois aux stores (Google Play, pub.dev, Chrome Web Store, addons.mozilla.org). Seul un vrai projet de test les vérifie.
 
 ## Séparer en plusieurs dépôts plus tard
 
 Chaque fichier a déjà un seul propriétaire, la séparation est donc mécanique :
 
-1. Créer un dépôt par dossier, par exemple `FloRobart/ci-gitflow`, `FloRobart/ci-nodejs`, etc.
+1. Créer un dépôt par dossier, par exemple `FloRobart/ci-gitflow`, `FloRobart/ci-auto`, `FloRobart/ci-nodejs`, etc.
 2. Y déplacer le contenu du dossier, ainsi que ses workflows de `.github/workflows/`.
 3. Remplacer les références `FloRobart/Github-ci/...` :
    - `FloRobart/Github-ci/.github/workflows/gitflow-*.yml` devient `FloRobart/ci-gitflow/.github/workflows/gitflow-*.yml` ;

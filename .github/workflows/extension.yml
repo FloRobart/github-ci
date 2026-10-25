@@ -1,0 +1,349 @@
+name: Extension
+
+# Reusable workflow (owner: extension/): the CI of a browser extension, gitflow included.
+#
+#   Pull request           →  gitflow checks + quality (lint, format, types, tests, build, web-ext lint)
+#   Button (Run workflow)  →  quality, then release candidate: extension archive + GitHub pre-release
+#   Merge on main          →  quality, then final version: extension archive + GitHub Release,
+#                             then submission to the Chrome Web Store and addons.mozilla.org
+#
+# A browser extension is a project whose name ends with "-extension" and which has a
+# package.json (gitflow/scripts/detect-project.sh). Any other project stops the release.
+#
+# Only a final version goes to the stores: they refuse a "-rc.N" version, and a release
+# candidate must never reach the users. Each store is skipped while its secrets are
+# missing, so a project can be released on GitHub long before its store accounts exist.
+#
+# Only the quality, archive and store jobs are specific to extensions: every gitflow
+# step comes from the gitflow-*.yml workflows. See extension/README.md for the project
+# requirements.
+#
+# Optional secrets, passed with "secrets: inherit":
+#
+#   CHROME_EXTENSION_ID, CHROME_PUBLISHER_ID, CHROME_CLIENT_ID,
+#   CHROME_CLIENT_SECRET, CHROME_REFRESH_TOKEN                   →  Chrome Web Store
+#   FIREFOX_API_KEY, FIREFOX_API_SECRET                          →  addons.mozilla.org
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version used by every job.
+        type: string
+        default: '24'
+      distribution-directory:
+        description: Directory produced by "npm run build", holding the manifest.json of the extension.
+        type: string
+        default: dist
+
+# One run at a time per branch: two clicks on the button, or two merges on main, wait
+# for each other. A pull request only keeps its latest run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# Pinned versions of the store tools, so a run never changes on its own.
+env:
+  WEB_EXT_VERSION: '10.7.0'
+  CHROME_WEBSTORE_UPLOAD_VERSION: '4.0.2'
+
+jobs:
+  #=========#
+  # Quality #
+  #=========#
+
+  gitflow-checks:
+    name: Gitflow
+    if: github.event_name == 'pull_request'
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-checks.yml@main
+
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      # "npm ci" installs exactly the versions of package-lock.json.
+      - name: Install the dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Only checks: the CI never rewrites the code, the developer runs the formatter.
+      - name: Check the formatting
+        run: npm run format:check
+
+      - name: Check the types
+        run: npm run typecheck
+
+      - name: Run the tests
+        run: npm test
+
+      # Built during the quality too: a broken build must show up in the pull request,
+      # not at release time.
+      - name: Build the extension
+        run: npm run build
+
+      # The validator of addons.mozilla.org: invalid manifest, forbidden code, missing
+      # files. Its warnings are shown but do not fail the run.
+      - name: Check the extension (web-ext lint)
+        env:
+          DISTRIBUTION_DIRECTORY: ${{ inputs.distribution-directory }}
+        run: npx --yes "web-ext@${WEB_EXT_VERSION}" lint --source-dir "${DISTRIBUTION_DIRECTORY}"
+
+  #=========#
+  # Release #
+  #=========#
+
+  prepare-release:
+    name: Prepare release
+    if: github.event_name != 'pull_request'
+    needs: quality
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-prepare-release.yml@main
+    with:
+      project-type: extension
+
+  extension-archive:
+    name: Extension archive
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+      DISTRIBUTION_DIRECTORY: ${{ inputs.distribution-directory }}
+      RELEASE_FILE_NAME: ${{ needs.prepare-release.outputs.project-name }}-${{ needs.prepare-release.outputs.tag }}
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      - name: Install the dependencies
+        run: npm ci
+
+      # Some build tools (WXT, CRXJS…) copy the version of package.json into the manifest.
+      # Only the copy built by the CI carries it: package.json is not committed.
+      - name: Set the version in package.json
+        run: npm version "${VERSION}" --no-git-tag-version --allow-same-version --ignore-scripts
+
+      - name: Build the extension
+        run: npm run build
+
+      # The stores only accept "X.Y.Z" in "version": "-rc.N" goes to "version_name",
+      # the version shown to the users. Written in the built manifest, whatever the build
+      # tool did with it.
+      - name: Set the version in the manifest
+        run: |
+          manifest_path="${DISTRIBUTION_DIRECTORY}/manifest.json"
+
+          if [ ! -f "${manifest_path}" ]; then
+            echo "::error title=manifest.json manquant::${manifest_path} n'existe pas après « npm run build ». Vérifiez le paramètre distribution-directory du ci.yml."
+            exit 1
+          fi
+
+          MANIFEST_PATH="${manifest_path}" node --eval '
+            const fileSystem = require("node:fs");
+            const manifestPath = process.env.MANIFEST_PATH;
+            const fullVersion = process.env.VERSION;
+
+            const manifest = JSON.parse(fileSystem.readFileSync(manifestPath, "utf8"));
+            manifest.version = fullVersion.split("-")[0];
+            manifest.version_name = fullVersion;
+
+            fileSystem.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+          '
+
+      - name: Package the extension
+        run: |
+          mkdir release-assets
+          (cd "${DISTRIBUTION_DIRECTORY}" && zip --recurse-paths -X "${GITHUB_WORKSPACE}/release-assets/${RELEASE_FILE_NAME}.zip" .)
+
+      # Picked up by gitflow-publish-release.yml and attached to the release, then by the
+      # store jobs.
+      - name: Upload the release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-release:
+    name: Publish release
+    needs: [prepare-release, extension-archive]
+    uses: FloRobart/Github-ci/.github/workflows/gitflow-publish-release.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      kind: ${{ needs.prepare-release.outputs.kind }}
+      version: ${{ needs.prepare-release.outputs.version }}
+      tag: ${{ needs.prepare-release.outputs.tag }}
+      previous-tag: ${{ needs.prepare-release.outputs.previous-tag }}
+      new-release-branch: ${{ needs.prepare-release.outputs.new-release-branch }}
+      release-assets: true
+
+  #========#
+  # Stores #
+  #========#
+
+  # The stores come after the GitHub Release: a store that refuses the version leaves
+  # the tag and the back-merge untouched. Each store is its own job, so "Re-run failed
+  # jobs" only sends the version again to the store that failed.
+
+  chrome-web-store:
+    name: Chrome Web Store
+    if: needs.prepare-release.outputs.kind == 'final'
+    needs: [prepare-release, publish-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      RELEASE_FILE_NAME: ${{ needs.prepare-release.outputs.project-name }}-${{ needs.prepare-release.outputs.tag }}
+
+    steps:
+      - name: Check the Chrome Web Store secrets
+        id: secrets
+        env:
+          EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+        run: |
+          if [ -n "${EXTENSION_ID}" ] && [ -n "${PUBLISHER_ID}" ] && [ -n "${CLIENT_ID}" ] && [ -n "${CLIENT_SECRET}" ] && [ -n "${REFRESH_TOKEN}" ]; then
+            echo 'configured=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "::notice title=Chrome Web Store ignoré::Les secrets CHROME_EXTENSION_ID, CHROME_PUBLISHER_ID, CHROME_CLIENT_ID, CHROME_CLIENT_SECRET et CHROME_REFRESH_TOKEN ne sont pas tous définis : l'extension n'est pas envoyée au Chrome Web Store."
+          echo 'configured=false' >> "${GITHUB_OUTPUT}"
+
+      - name: Download the release files
+        if: steps.secrets.outputs.configured == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Set up Node.js
+        if: steps.secrets.outputs.configured == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      # Without a command, the tool uploads the archive then submits it for review.
+      - name: Send the extension to the Chrome Web Store
+        if: steps.secrets.outputs.configured == 'true'
+        env:
+          EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+        run: |
+          npx --yes "chrome-webstore-upload-cli@${CHROME_WEBSTORE_UPLOAD_VERSION}" --source "release-assets/${RELEASE_FILE_NAME}.zip"
+
+          {
+            echo '### 🧩 Chrome Web Store'
+            echo
+            echo "\`${RELEASE_FILE_NAME}.zip\` envoyé : visible des utilisateurs après la validation de Google."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  firefox-add-ons:
+    name: Firefox Add-ons
+    if: needs.prepare-release.outputs.kind == 'final'
+    needs: [prepare-release, publish-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      RELEASE_FILE_NAME: ${{ needs.prepare-release.outputs.project-name }}-${{ needs.prepare-release.outputs.tag }}
+
+    steps:
+      - name: Check the addons.mozilla.org secrets
+        id: secrets
+        env:
+          FIREFOX_API_KEY: ${{ secrets.FIREFOX_API_KEY }}
+          FIREFOX_API_SECRET: ${{ secrets.FIREFOX_API_SECRET }}
+        run: |
+          if [ -n "${FIREFOX_API_KEY}" ] && [ -n "${FIREFOX_API_SECRET}" ]; then
+            echo 'configured=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "::notice title=addons.mozilla.org ignoré::Les secrets FIREFOX_API_KEY et FIREFOX_API_SECRET ne sont pas tous définis : l'extension n'est pas envoyée sur addons.mozilla.org."
+          echo 'configured=false' >> "${GITHUB_OUTPUT}"
+
+      # The sources are sent along with the extension: addons.mozilla.org requires them
+      # to review a minified or bundled code.
+      - name: Checkout the project
+        if: steps.secrets.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the release files
+        if: steps.secrets.outputs.configured == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release-assets
+
+      - name: Set up Node.js
+        if: steps.secrets.outputs.configured == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      # "web-ext sign" only reads a directory: the archive built once is unpacked, so
+      # Firefox receives exactly the files attached to the GitHub Release.
+      - name: Send the extension to addons.mozilla.org
+        if: steps.secrets.outputs.configured == 'true'
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.FIREFOX_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.FIREFOX_API_SECRET }}
+        run: |
+          extension_directory="${RUNNER_TEMP}/extension"
+          source_archive="${RUNNER_TEMP}/${RELEASE_FILE_NAME}-source.zip"
+
+          unzip -q "${RUNNER_TEMP}/release-assets/${RELEASE_FILE_NAME}.zip" -d "${extension_directory}"
+          git archive --format=zip --output "${source_archive}" HEAD
+
+          # "--approval-timeout 0" only submits: the review by Mozilla can take days.
+          npx --yes "web-ext@${WEB_EXT_VERSION}" sign \
+            --source-dir "${extension_directory}" \
+            --artifacts-dir "${RUNNER_TEMP}/web-ext-artifacts" \
+            --channel listed \
+            --upload-source-code "${source_archive}" \
+            --approval-timeout 0
+
+          {
+            echo '### 🦊 addons.mozilla.org'
+            echo
+            echo "\`${RELEASE_FILE_NAME}.zip\` envoyé : visible des utilisateurs après la validation de Mozilla."
+          } >> "${GITHUB_STEP_SUMMARY}"

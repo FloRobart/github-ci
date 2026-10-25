@@ -1,4 +1,5 @@
 # CI of the project: gitflow, quality and releases.
+# Direct import of one type CI: auto/example/ci.yml is the same for every project.
 # Everything lives in FloRobart/Github-ci, see nodejs/README.md over there.
 
 name: CI
@@ -16,7 +17,8 @@ permissions:
   id-token: write       # npm trusted publishing of a library, without token
 
 jobs:
-  # Keep the job id "ci": the rulesets expect checks named "ci / ...".
+  # Keep the job id "ci": the ruleset protected-branches-type-ci.json expects checks
+  # named "ci / ...".
   ci:
     uses: FloRobart/Github-ci/.github/workflows/nodejs.yml@main
     secrets: inherit

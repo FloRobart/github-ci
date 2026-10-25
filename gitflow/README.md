@@ -2,7 +2,7 @@
 
 La partie commune à tous les types de projets : règles du git flow, calcul de version, image Docker, GitHub Release et back-merge.
 
-Un projet n'utilise jamais ce dossier directement. Il passe par la CI de son type ([nodejs](../nodejs/README.md), [astro](../astro/README.md), [flutter](../flutter/README.md)), qui appelle ces briques.
+Un projet n'utilise jamais ce dossier directement. Il passe par [auto](../auto/README.md), qui choisit la CI de son type ([nodejs](../nodejs/README.md), [astro](../astro/README.md), [flutter](../flutter/README.md), [extension](../extension/README.md)), ou directement par l'une d'elles. Ce sont elles qui appellent ces briques.
 
 ## Les branches
 
@@ -64,21 +64,39 @@ La version vient des messages de commit ajoutés depuis le dernier tag `vX.Y.Z`.
 - Un projet sans aucun tag `vX.Y.Z` commence à `0.1.0`.
 - Une branche `release/vX.Y.Z` doit toujours correspondre à la version que donnent ses commits. Elles divergent si un `feat` ou un changement cassant est poussé sur la release après sa création : la pull request vers `main` est alors bloquée.
 
+## Type de projet
+
+[detect-project.sh](scripts/detect-project.sh) lit les fichiers à la racine du projet et le suffixe du nom du dépôt. Il en tire la CI de type à lancer (`flutter`, `nodejs`, `astro` ou `extension`) et ce qu'elle publie (application, librairie ou extension). Les règles se lisent de haut en bas, la première qui correspond gagne :
+
+| Fichiers | Nom du dépôt | Résultat |
+|---|---|---|
+| `pubspec.yaml` | `…-lib` | Librairie Flutter. Un `Dockerfile` fait échouer la CI. |
+| `pubspec.yaml` | `…-app` | Application Flutter, mobile seulement s'il n'y a pas de `Dockerfile` |
+| `pubspec.yaml` | `…-extension` | Refusé : une extension navigateur se construit avec npm |
+| `pubspec.yaml` + `Dockerfile` | Autre | Application Flutter |
+| `pubspec.yaml` | Autre | Librairie Flutter, avec un avertissement : renommer en `-lib` pour le confirmer, ou en `-app` si c'est une application mobile |
+| `package.json` | `…-extension` | Extension navigateur. Le `Dockerfile` est ignoré. |
+| `package.json` | `…-lib` | Librairie Node.js. Un `Dockerfile` fait échouer la CI. |
+| `package.json` + `Dockerfile` | Autre, `-app` compris | Site Astro si `astro` est dans les `dependencies` ou les `devDependencies`, application Node.js sinon |
+| `package.json` | `…-app` | Refusé : une application Node.js ou Astro est publiée en image Docker |
+| `package.json` | Autre | Refusé : impossible de savoir si c'est une application ou une librairie |
+| Ni l'un ni l'autre | — | Refusé |
+
+- `pubspec.yaml` passe avant `package.json` : un projet Flutter peut avoir un `package.json` pour ses outils (husky, commitlint…).
+- Le suffixe passe avant le `Dockerfile`.
+- Le suffixe est lu sur le nom normalisé (voir plus bas) : `FlorAccess_App` devient `floraccess-app`.
+- Un script npm nommé `astro` ne compte pas : seule la dépendance fait un site Astro. Une librairie de composants Astro (`…-lib`) reste une librairie npm.
+
+La détection tourne à deux endroits :
+
+1. Dans [auto.yml](../.github/workflows/auto.yml), à chaque run, pour choisir la CI de type.
+2. Dans `gitflow-prepare-release.yml`, avant chaque release. Une CI de type refuse de publier un projet détecté comme un autre type, ce qui ne peut arriver qu'avec un import direct mal choisi.
+
 ## Ce qui est publié
 
 Le nom vient du dépôt, en minuscules, avec des tirets à la place des autres caractères : `FlorAccess` → `floraccess`, `My_API.Server` → `my-api-server`.
 
-### Application ou librairie
-
-Le suffixe du nom dit ce qu'est le projet, et donc ce que la CI de son type construit :
-
-| Nom | Type | Règle sur le `Dockerfile` |
-|---|---|---|
-| `…-app` | Application : image Docker, build Android… | Selon le type de projet |
-| `…-lib` | Librairie : paquet npm, simple tag git… | Interdit, la CI échoue s'il existe |
-| Autre | Application s'il y a un `Dockerfile`, librairie sinon | Un avertissement demande de renommer le dépôt |
-
-Ce que chaque type fait d'une application ou d'une librairie est décrit dans son README. Le tableau ci-dessous concerne une application publiée en image Docker.
+Ce que chaque type publie est décrit dans son README. Le tableau ci-dessous concerne une application publiée en image Docker.
 
 | | Release candidate | Version finale |
 |---|---|---|
@@ -91,7 +109,7 @@ L'image Docker Hub n'est publiée que si les secrets `DOCKERHUB_USERNAME` et `DO
 
 ## Installer dans un projet
 
-À faire une fois par projet, en plus du fichier `ci.yml` décrit dans le README du type.
+À faire une fois par projet, en plus du fichier `ci.yml` décrit dans [auto/README.md](../auto/README.md), ou dans le README du type en cas d'import direct.
 
 ### 1. Les réglages du dépôt
 
@@ -99,11 +117,12 @@ L'image Docker Hub n'est publiée que si les secrets `DOCKERHUB_USERNAME` et `DO
 |---|---|
 | Settings → General → Pull Requests | Ne garder que **Allow merge commits**. Cocher **Automatically delete head branches**. |
 | Settings → Actions → General → Workflow permissions | Cocher **Allow GitHub Actions to create and approve pull requests** : la CI ouvre les pull requests de release et de back-merge. |
-| Settings → Rules → Rulesets → New ruleset → Import a ruleset | Importer [rulesets/protected-branches.json](rulesets/protected-branches.json) et [rulesets/branch-names.json](rulesets/branch-names.json). |
+| Settings → Rules → Rulesets → New ruleset → Import a ruleset | Importer [rulesets/protected-branches.json](rulesets/protected-branches.json) et [rulesets/branch-names.json](rulesets/branch-names.json). Pour un projet qui appelle directement une CI de type, importer [rulesets/protected-branches-type-ci.json](rulesets/protected-branches-type-ci.json) à la place de `protected-branches.json`. |
 
 Les rulesets sont les garde-fous que la CI ne peut pas poser elle-même :
 
-- **protected-branches** : sur `main` et `dev`, plus de push direct ni de suppression, pull request obligatoire, merge commit imposé, vérifications `ci / Gitflow / Checks` et `ci / Quality` obligatoires.
+- **protected-branches** : sur `main` et `dev`, plus de push direct ni de suppression, pull request obligatoire, merge commit imposé, vérifications `ci / Project / Gitflow / Checks` et `ci / Project / Quality` obligatoires.
+- **protected-branches-type-ci** : les mêmes règles, avec les noms de vérifications d'un import direct, `ci / Gitflow / Checks` et `ci / Quality`.
 - **branch-names** : refuse la création de toute branche dont le nom ne fait pas partie du git flow.
 
 ### 2. Les secrets, tous facultatifs
@@ -115,6 +134,10 @@ Settings → Secrets and variables → Actions :
 | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Publie aussi l'image sur Docker Hub. Le token se crée dans Docker Hub → Account settings → Personal access tokens, en *Read & Write*. |
 | `GITFLOW_TOKEN` | Voir ci-dessous. |
 | `NPM_TOKEN` | Librairie Node.js : publie sur npmjs.com sans trusted publishing. Voir [nodejs/README.md](../nodejs/README.md#le-paquet-npm). |
+| `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | Application Flutter : signe l'APK et l'AAB. Voir [flutter/README.md](../flutter/README.md#signature). |
+| `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Application Flutter : envoi sur Google Play. Voir [flutter/README.md](../flutter/README.md#google-play). |
+| `PUB_DEV_SERVICE_ACCOUNT_JSON` | Librairie Flutter : publication sur pub.dev. Voir [flutter/README.md](../flutter/README.md#pubdev). |
+| `CHROME_*`, `FIREFOX_*` | Extension : envoi au Chrome Web Store et sur addons.mozilla.org. Voir [extension/README.md](../extension/README.md#les-stores). |
 
 **Pourquoi `GITFLOW_TOKEN` ?** GitHub ne lance aucun workflow sur une pull request ouverte avec le jeton par défaut des Actions. Sans ce secret, les vérifications des pull requests de release et de back-merge ne démarrent pas : il faut fermer puis rouvrir la pull request pour les lancer. Pour l'éviter, créer un *fine-grained personal access token* (Settings du compte → Developer settings) limité au projet, avec **Contents** et **Pull requests** en lecture et écriture, et l'enregistrer dans ce secret.
 
@@ -154,7 +177,7 @@ Ils sont dans [.github/workflows](../.github/workflows) à la racine du dépôt,
 | Fichier | Rôle |
 |---|---|
 | [gitflow-checks.yml](../.github/workflows/gitflow-checks.yml) | Pull request : règles de branches, messages de commit, version d'une release |
-| [gitflow-prepare-release.yml](../.github/workflows/gitflow-prepare-release.yml) | Bouton ou merge sur `main` : décide quoi publier (version, tag, branche à créer, application ou librairie). N'écrit rien. |
+| [gitflow-prepare-release.yml](../.github/workflows/gitflow-prepare-release.yml) | Bouton ou merge sur `main` : décide quoi publier (version, tag, branche à créer, application, librairie ou extension). N'écrit rien. |
 | [gitflow-docker-image.yml](../.github/workflows/gitflow-docker-image.yml) | Construit l'image d'une application une fois et la pousse sur GHCR et Docker Hub |
 | [gitflow-publish-release.yml](../.github/workflows/gitflow-publish-release.yml) | Branche de release et sa pull request, tag et GitHub Release, back-merge |
 
@@ -173,7 +196,7 @@ Ordre d'appel par une CI de type : `gitflow-checks` en parallèle de la qualité
 | [compute-next-version.sh](scripts/compute-next-version.sh) | Version suivante depuis les commits |
 | [plan-release.sh](scripts/plan-release.sh) | Ce que le run publie |
 | [to-image-name.sh](scripts/to-image-name.sh) | Nom de l'image depuis le nom du dépôt |
-| [detect-project-kind.sh](scripts/detect-project-kind.sh) | Application ou librairie, depuis le suffixe du nom et le `Dockerfile` |
+| [detect-project.sh](scripts/detect-project.sh) | CI de type à lancer et ce qu'elle publie, depuis le `pubspec.yaml`, le `package.json`, le `Dockerfile` et le suffixe du nom |
 | [create-branch.sh](scripts/create-branch.sh) | Crée une branche sur GitHub |
 | [open-pull-request.sh](scripts/open-pull-request.sh) | Ouvre une pull request si elle n'existe pas encore |
 | [create-github-release.sh](scripts/create-github-release.sh) | Tag et GitHub Release |
@@ -184,12 +207,16 @@ Tests : `gitflow/tests/run-tests.sh`.
 
 | Symptôme | Cause |
 |---|---|
-| Pull request bloquée sur « Expected — Waiting for status to be reported » | Pull request ouverte par la CI sans `GITFLOW_TOKEN` : la fermer puis la rouvrir. Sinon, vérifier que le job du `ci.yml` du projet s'appelle bien `ci`. |
+| Pull request bloquée sur « Expected — Waiting for status to be reported » | Pull request ouverte par la CI sans `GITFLOW_TOKEN` : la fermer puis la rouvrir. Sinon, vérifier que le job du `ci.yml` du projet s'appelle bien `ci`, et que le ruleset importé correspond au `ci.yml` : `protected-branches.json` pour `auto.yml`, `protected-branches-type-ci.json` pour une CI de type. |
 | « Message de commit invalide » | Corriger les messages avec `git rebase -i`, puis `git push --force-with-lease`. Un revert fait depuis l'interface de GitHub (« Revert "…" ») est refusé : écrire `revert: …`. |
 | « main non mergée dans dev » | Merger la pull request de back-merge `main` → `dev` avant de relancer le bouton. |
 | « Release déjà en cours » | Publier ou abandonner la release en cours. |
 | « Rien à publier » | Aucun commit depuis la dernière version. |
+| « Projet non reconnu » | Ni `pubspec.yaml` ni `package.json` à la racine du projet. |
 | « Librairie avec un Dockerfile » | Un dépôt `…-lib` a un `Dockerfile` : le supprimer, ou renommer le dépôt en `…-app`. |
-| « Dockerfile manquant » | Une application doit être publiée en image Docker mais n'a pas de `Dockerfile` à la racine. |
-| Avertissement « Nom sans suffixe » | Le dépôt ne finit ni par `-app` ni par `-lib` : le type est deviné depuis le `Dockerfile`. Renommer le dépôt pour lever le doute. |
+| « Extension Flutter » | Un dépôt `…-extension` a un `pubspec.yaml` : une extension se construit avec npm. |
+| « Type de projet ambigu » | Un `package.json` sans `Dockerfile` ni suffixe : ajouter un `Dockerfile` (application), ou renommer le dépôt en `…-lib` ou `…-extension`. |
+| « Dockerfile manquant » | Une application Node.js ou Astro (`…-app`) n'a pas de `Dockerfile` à la racine. |
+| « Mauvaise CI de type » | Le `ci.yml` du projet appelle une CI de type qui n'est pas celle du type détecté, par exemple `nodejs.yml` pour un site Astro : appeler `auto.yml`, ou la bonne CI. |
+| Avertissement « Librairie Flutter sans suffixe » | Un `pubspec.yaml` sans `Dockerfile` ni suffixe est traité comme une librairie. Renommer le dépôt en `…-lib` pour le confirmer, ou en `…-app` si c'est une application mobile. |
 | Le bouton **Run workflow** n'apparaît pas | Le fichier `ci.yml` doit exister sur la branche par défaut du dépôt. |
