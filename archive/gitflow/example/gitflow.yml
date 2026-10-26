@@ -1,8 +1,0 @@
-name: Gitflow
-on:
-  pull_request: { types: [opened, edited, synchronize, reopened] }
-  push: { branches: [main] }
-  workflow_dispatch:
-permissions: { contents: write, packages: write, pull-requests: write }
-jobs:
-  gitflow: { uses: FloRobart/github-ci/.github/workflows/gitflow.yml@main, secrets: inherit }
