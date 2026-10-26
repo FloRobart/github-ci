@@ -64,7 +64,7 @@ Pour appeler directement cette CI :
 ```yaml
 jobs:
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/extension.yml@main
+    uses: FloRobart/github-ci/.github/workflows/extension.yml@main
     secrets: inherit
 ```
 
@@ -80,7 +80,7 @@ Le job doit garder l'identifiant `ci` : le ruleset attend les vérifications `ci
 ```yaml
 jobs:
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/extension.yml@main
+    uses: FloRobart/github-ci/.github/workflows/extension.yml@main
     secrets: inherit
     with:
       distribution-directory: '.output/chrome-mv3'

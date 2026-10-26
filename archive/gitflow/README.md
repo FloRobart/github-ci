@@ -59,7 +59,7 @@ on:
   workflow_dispatch:
 permissions: { contents: write, packages: write, pull-requests: write }
 jobs:
-  gitflow: { uses: FloRobart/Github-ci/.github/workflows/gitflow.yml@main, secrets: inherit }
+  gitflow: { uses: FloRobart/github-ci/.github/workflows/gitflow.yml@main, secrets: inherit }
 ```
 
 Le job doit garder le nom `gitflow` : les rulesets attendent des vérifications dont le nom commence par `gitflow / …`.
@@ -141,7 +141,7 @@ Deux paramètres facultatifs, à ajouter au fichier d'import :
 ```yaml
 jobs:
   gitflow:
-    uses: FloRobart/Github-ci/.github/workflows/gitflow.yml@main
+    uses: FloRobart/github-ci/.github/workflows/gitflow.yml@main
     secrets: inherit
     with:
       node-version: '22'
@@ -155,7 +155,7 @@ jobs:
 
 ## Publier ce dépôt
 
-Le contenu de ce dossier doit être à la **racine** du dépôt `FloRobart/Github-ci` : GitHub ne lit les workflows réutilisables que dans `.github/workflows`.
+Le contenu de ce dossier doit être à la **racine** du dépôt `FloRobart/github-ci` : GitHub ne lit les workflows réutilisables que dans `.github/workflows`.
 
 Si le dépôt est privé : Settings → Actions → General → Access → **Accessible from repositories owned by the user**.
 

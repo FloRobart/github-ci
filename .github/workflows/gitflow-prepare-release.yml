@@ -78,7 +78,7 @@ jobs:
           persist-credentials: false
 
       - name: Load the gitflow scripts
-        uses: FloRobart/Github-ci/gitflow/scripts@main
+        uses: FloRobart/github-ci/gitflow/scripts@main
 
       - name: Plan the release
         id: plan

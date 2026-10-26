@@ -20,7 +20,7 @@ permissions:
 jobs:
   release:
     name: Release
-    uses: FloRobart/Github-ci/.github/workflows/publish-release.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/publish-release.yml@v1
     with:
       project-type: flutter
       automation-app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
@@ -31,7 +31,7 @@ jobs:
     name: Quality
     needs: release
     if: ${{ needs.release.outputs.should-publish == 'true' }}
-    uses: FloRobart/Github-ci/.github/workflows/flutter-quality.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/flutter-quality.yml@v1
 
   web-image:
     name: Web image
@@ -39,7 +39,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: FloRobart/Github-ci/.github/workflows/docker-publish.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/docker-publish.yml@v1
     with:
       image-name: my-app-web # TODO: name of the image, for example "econoris-app-web"
       version: ${{ needs.release.outputs.version }}
@@ -54,7 +54,7 @@ jobs:
     name: Back-merge
     needs: release
     if: ${{ needs.release.outputs.should-publish == 'true' }}
-    uses: FloRobart/Github-ci/.github/workflows/back-merge.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/back-merge.yml@v1
     with:
       released-version: ${{ needs.release.outputs.version }}
       project-type: flutter

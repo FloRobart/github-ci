@@ -187,7 +187,7 @@ Ordre d'appel par une CI de type : `gitflow-checks` en parallèle de la qualité
 
 ### Scripts
 
-[scripts/](scripts) est aussi une composite action : `uses: FloRobart/Github-ci/gitflow/scripts@main` ajoute les scripts au `PATH` du job, sans checkout de ce dépôt.
+[scripts/](scripts) est aussi une composite action : `uses: FloRobart/github-ci/gitflow/scripts@main` ajoute les scripts au `PATH` du job, sans checkout de ce dépôt.
 
 | Script | Rôle |
 |---|---|

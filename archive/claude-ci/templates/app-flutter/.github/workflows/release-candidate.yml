@@ -16,12 +16,12 @@ permissions:
 jobs:
   quality:
     name: Quality
-    uses: FloRobart/Github-ci/.github/workflows/flutter-quality.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/flutter-quality.yml@v1
 
   candidate:
     name: Candidate
     needs: quality
-    uses: FloRobart/Github-ci/.github/workflows/release-candidate.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/release-candidate.yml@v1
     with:
       project-type: flutter
       automation-app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
@@ -34,7 +34,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: FloRobart/Github-ci/.github/workflows/docker-publish.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/docker-publish.yml@v1
     with:
       image-name: my-app-web # TODO: name of the image, for example "econoris-app-web"
       version: ${{ needs.candidate.outputs.version }}

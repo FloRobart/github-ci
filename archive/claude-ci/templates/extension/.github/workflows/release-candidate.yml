@@ -17,7 +17,7 @@ permissions:
 jobs:
   candidate:
     name: Candidate
-    uses: FloRobart/Github-ci/.github/workflows/release-candidate.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/release-candidate.yml@v1
     with:
       project-type: extension
       extension-manifest-path: public/manifest.json
@@ -30,7 +30,7 @@ jobs:
     needs: candidate
     permissions:
       contents: write
-    uses: FloRobart/Github-ci/.github/workflows/extension-build.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/extension-build.yml@v1
     with:
       version: ${{ needs.candidate.outputs.version }}
       release-tag: ${{ needs.candidate.outputs.tag }}

@@ -59,7 +59,7 @@ Pour appeler directement cette CI :
 ```yaml
 jobs:
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/database.yml@main
+    uses: FloRobart/github-ci/.github/workflows/database.yml@main
     secrets: inherit
 ```
 

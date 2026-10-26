@@ -14,7 +14,7 @@ permissions:
 jobs:
   start:
     name: Start hotfix
-    uses: FloRobart/Github-ci/.github/workflows/start-release-or-hotfix.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/start-release-or-hotfix.yml@v1
     with:
       kind: hotfix
       project-type: node

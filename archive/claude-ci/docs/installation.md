@@ -6,7 +6,7 @@ Deux étapes sont à faire une seule fois, puis cinq étapes par projet.
 
 ### 1. Publier ce dépôt
 
-Les projets appellent ce dépôt par son nom, `FloRobart/Github-ci`, et par le tag `v1`. Il doit être **public** : un dépôt public ne peut appeler que des workflows publics.
+Les projets appellent ce dépôt par son nom, `FloRobart/github-ci`, et par le tag `v1`. Il doit être **public** : un dépôt public ne peut appeler que des workflows publics.
 
 ```bash
 git init --initial-branch main
@@ -17,14 +17,14 @@ git add . && git commit --message "feat: reusable Git workflow pipelines"
 ```
 
 ```bash
-gh repo create FloRobart/Github-ci --public --source . --push
+gh repo create FloRobart/github-ci --public --source . --push
 ```
 
 ```bash
 git tag v1 && git push origin v1
 ```
 
-Si tu choisis un autre nom de dépôt, remplace `FloRobart/Github-ci` dans les fichiers de `templates/`.
+Si tu choisis un autre nom de dépôt, remplace `FloRobart/github-ci` dans les fichiers de `templates/`.
 
 ### 2. Créer la GitHub App d'automatisation
 
@@ -147,7 +147,7 @@ Conseil : passe `develop` en branche par défaut du dépôt. Les nouvelles pull 
     permissions:
       contents: read
       packages: write
-    uses: FloRobart/Github-ci/.github/workflows/docker-publish.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/docker-publish.yml@v1
     with:
       image-name: econoris-db
       context: Database

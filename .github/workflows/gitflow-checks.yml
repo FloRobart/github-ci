@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - name: Load the gitflow scripts
-        uses: FloRobart/Github-ci/gitflow/scripts@main
+        uses: FloRobart/github-ci/gitflow/scripts@main
 
       - name: Check the branch flow
         run: check-pull-request-branches.sh "${SOURCE_BRANCH}" "${TARGET_BRANCH}"

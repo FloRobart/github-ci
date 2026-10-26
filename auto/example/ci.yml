@@ -1,5 +1,5 @@
 # CI of the project: gitflow, quality and releases.
-# The same file for every project: FloRobart/Github-ci detects the type of the project
+# The same file for every project: FloRobart/github-ci detects the type of the project
 # and runs the right CI. See auto/README.md over there.
 
 name: CI
@@ -22,5 +22,5 @@ jobs:
   # Keep the job id "ci": the ruleset protected-branches.json expects checks named
   # "ci / Project / ...".
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/auto.yml@main
+    uses: FloRobart/github-ci/.github/workflows/auto.yml@main
     secrets: inherit

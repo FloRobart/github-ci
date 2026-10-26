@@ -93,7 +93,7 @@ archive/                    Anciennes versions, conservées pour mémoire
 
 ## Publier ce dépôt
 
-- Ce dépôt doit s'appeler `FloRobart/Github-ci`. Toutes les références internes pointent sur `FloRobart/Github-ci/...@main`.
+- Ce dépôt doit s'appeler `FloRobart/github-ci`. Toutes les références internes pointent sur `FloRobart/github-ci/...@main`.
 - S'il est privé : Settings → Actions → General → Access → **Accessible from repositories owned by the user**.
 - Les projets suivent `@main` : une modification mergée sur `main` s'applique à tous les projets dès leur prochain lancement.
 
@@ -125,7 +125,7 @@ Chaque fichier a déjà un seul propriétaire, la séparation est donc mécaniqu
 
 1. Créer un dépôt par dossier, par exemple `FloRobart/ci-gitflow`, `FloRobart/ci-auto`, `FloRobart/ci-nodejs`, etc.
 2. Y déplacer le contenu du dossier, ainsi que ses workflows de `.github/workflows/`.
-3. Remplacer les références `FloRobart/Github-ci/...` :
-   - `FloRobart/Github-ci/.github/workflows/gitflow-*.yml` devient `FloRobart/ci-gitflow/.github/workflows/gitflow-*.yml` ;
-   - `FloRobart/Github-ci/gitflow/scripts` devient `FloRobart/ci-gitflow/scripts`.
+3. Remplacer les références `FloRobart/github-ci/...` :
+   - `FloRobart/github-ci/.github/workflows/gitflow-*.yml` devient `FloRobart/ci-gitflow/.github/workflows/gitflow-*.yml` ;
+   - `FloRobart/github-ci/gitflow/scripts` devient `FloRobart/ci-gitflow/scripts`.
 4. Mettre à jour les fichiers `ci.yml` des projets.

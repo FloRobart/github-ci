@@ -21,10 +21,10 @@ concurrency:
 jobs:
   policy:
     name: Policy
-    uses: FloRobart/Github-ci/.github/workflows/pull-request-policy.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/pull-request-policy.yml@v1
     with:
       project-type: flutter
 
   quality:
     name: Quality
-    uses: FloRobart/Github-ci/.github/workflows/flutter-quality.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/flutter-quality.yml@v1

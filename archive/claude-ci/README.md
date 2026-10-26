@@ -95,7 +95,7 @@ Les paramètres de chaque workflow sont décrits en tête de son fichier, dans l
 Exemple d'utilisation d'une seule brique, sans le reste du flux :
 
 ```yaml
-- uses: FloRobart/Github-ci/actions/validate-pull-request-title@v1
+- uses: FloRobart/github-ci/actions/validate-pull-request-title@v1
   with:
     title: ${{ github.event.pull_request.title }}
 ```
@@ -126,7 +126,7 @@ git push --force origin v1
 
 Les scripts sont toujours exécutés dans la version exacte du workflow qui les appelle : il n'y a aucune autre référence de version à tenir à jour.
 
-Pour essayer une modification avant de déplacer `v1`, un projet de test peut pointer sur une branche : `uses: FloRobart/Github-ci/.github/workflows/publish-release.yml@ma-branche`.
+Pour essayer une modification avant de déplacer `v1`, un projet de test peut pointer sur une branche : `uses: FloRobart/github-ci/.github/workflows/publish-release.yml@ma-branche`.
 
 Les tests unitaires se lancent avec Node.js 20 ou plus récent, sans installation :
 

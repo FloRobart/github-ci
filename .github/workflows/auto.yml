@@ -77,7 +77,7 @@ jobs:
           persist-credentials: false
 
       - name: Load the gitflow scripts
-        uses: FloRobart/Github-ci/gitflow/scripts@main
+        uses: FloRobart/github-ci/gitflow/scripts@main
 
       - name: Detect the project
         id: project
@@ -108,7 +108,7 @@ jobs:
     name: Project
     needs: detect
     if: needs.detect.outputs.type == 'flutter'
-    uses: FloRobart/Github-ci/.github/workflows/flutter.yml@main
+    uses: FloRobart/github-ci/.github/workflows/flutter.yml@main
     secrets: inherit
     permissions:
       contents: write
@@ -124,7 +124,7 @@ jobs:
     name: Project
     needs: detect
     if: needs.detect.outputs.type == 'nodejs'
-    uses: FloRobart/Github-ci/.github/workflows/nodejs.yml@main
+    uses: FloRobart/github-ci/.github/workflows/nodejs.yml@main
     secrets: inherit
     permissions:
       contents: write
@@ -138,7 +138,7 @@ jobs:
     name: Project
     needs: detect
     if: needs.detect.outputs.type == 'astro'
-    uses: FloRobart/Github-ci/.github/workflows/astro.yml@main
+    uses: FloRobart/github-ci/.github/workflows/astro.yml@main
     secrets: inherit
     permissions:
       contents: write
@@ -151,7 +151,7 @@ jobs:
     name: Project
     needs: detect
     if: needs.detect.outputs.type == 'extension'
-    uses: FloRobart/Github-ci/.github/workflows/extension.yml@main
+    uses: FloRobart/github-ci/.github/workflows/extension.yml@main
     secrets: inherit
     permissions:
       contents: write
@@ -164,7 +164,7 @@ jobs:
     name: Project
     needs: detect
     if: needs.detect.outputs.type == 'database'
-    uses: FloRobart/Github-ci/.github/workflows/database.yml@main
+    uses: FloRobart/github-ci/.github/workflows/database.yml@main
     secrets: inherit
     permissions:
       contents: write

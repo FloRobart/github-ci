@@ -1,6 +1,6 @@
 # CI of the project: gitflow, quality and releases.
 # Direct import of one type CI: auto/example/ci.yml is the same for every project.
-# Everything lives in FloRobart/Github-ci, see database/README.md over there.
+# Everything lives in FloRobart/github-ci, see database/README.md over there.
 
 name: CI
 
@@ -19,5 +19,5 @@ jobs:
   # Keep the job id "ci": the ruleset protected-branches-type-ci.json expects checks
   # named "ci / ...".
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/database.yml@main
+    uses: FloRobart/github-ci/.github/workflows/database.yml@main
     secrets: inherit

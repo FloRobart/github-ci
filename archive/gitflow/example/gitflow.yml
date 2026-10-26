@@ -5,4 +5,4 @@ on:
   workflow_dispatch:
 permissions: { contents: write, packages: write, pull-requests: write }
 jobs:
-  gitflow: { uses: FloRobart/Github-ci/.github/workflows/gitflow.yml@main, secrets: inherit }
+  gitflow: { uses: FloRobart/github-ci/.github/workflows/gitflow.yml@main, secrets: inherit }

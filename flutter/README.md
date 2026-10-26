@@ -47,7 +47,7 @@ Pour appeler directement cette CI :
 ```yaml
 jobs:
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/flutter.yml@main
+    uses: FloRobart/github-ci/.github/workflows/flutter.yml@main
     secrets: inherit
 ```
 
@@ -67,7 +67,7 @@ Une librairie ignore `docker-image`, `android` et `google-play-track`. Les même
 ```yaml
 jobs:
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/flutter.yml@main
+    uses: FloRobart/github-ci/.github/workflows/flutter.yml@main
     secrets: inherit
     with:
       flutter-version: '3.35.0'

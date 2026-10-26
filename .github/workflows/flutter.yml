@@ -73,7 +73,7 @@ jobs:
   gitflow-checks:
     name: Gitflow
     if: github.event_name == 'pull_request'
-    uses: FloRobart/Github-ci/.github/workflows/gitflow-checks.yml@main
+    uses: FloRobart/github-ci/.github/workflows/gitflow-checks.yml@main
 
   quality:
     name: Quality
@@ -108,7 +108,7 @@ jobs:
 
       # The project kind tells what the release builds, so what must be built here.
       - name: Load the gitflow scripts
-        uses: FloRobart/Github-ci/gitflow/scripts@main
+        uses: FloRobart/github-ci/gitflow/scripts@main
 
       - name: Detect the project
         id: project
@@ -160,7 +160,7 @@ jobs:
     name: Prepare release
     if: github.event_name != 'pull_request'
     needs: quality
-    uses: FloRobart/Github-ci/.github/workflows/gitflow-prepare-release.yml@main
+    uses: FloRobart/github-ci/.github/workflows/gitflow-prepare-release.yml@main
     with:
       project-type: flutter
 
@@ -171,7 +171,7 @@ jobs:
       && needs.prepare-release.outputs.project-kind == 'application'
       && needs.prepare-release.outputs.has-dockerfile == 'true'
     needs: prepare-release
-    uses: FloRobart/Github-ci/.github/workflows/gitflow-docker-image.yml@main
+    uses: FloRobart/github-ci/.github/workflows/gitflow-docker-image.yml@main
     secrets: inherit
     permissions:
       contents: read
@@ -283,7 +283,7 @@ jobs:
     # application, library): a skipped job is fine, a failed one stops the release.
     if: ${{ !failure() && !cancelled() && needs.prepare-release.result == 'success' }}
     needs: [prepare-release, docker-image, android]
-    uses: FloRobart/Github-ci/.github/workflows/gitflow-publish-release.yml@main
+    uses: FloRobart/github-ci/.github/workflows/gitflow-publish-release.yml@main
     secrets: inherit
     permissions:
       contents: write

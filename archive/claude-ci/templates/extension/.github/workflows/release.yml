@@ -22,7 +22,7 @@ permissions:
 jobs:
   release:
     name: Release
-    uses: FloRobart/Github-ci/.github/workflows/publish-release.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/publish-release.yml@v1
     with:
       project-type: extension
       extension-manifest-path: public/manifest.json
@@ -36,7 +36,7 @@ jobs:
     if: ${{ needs.release.outputs.should-publish == 'true' }}
     permissions:
       contents: write
-    uses: FloRobart/Github-ci/.github/workflows/extension-build.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/extension-build.yml@v1
     with:
       version: ${{ needs.release.outputs.version }}
       release-tag: ${{ needs.release.outputs.tag }}
@@ -44,7 +44,7 @@ jobs:
   stores:
     name: Stores
     needs: [release, package]
-    uses: FloRobart/Github-ci/.github/workflows/extension-publish.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/extension-publish.yml@v1
     with:
       version: ${{ needs.release.outputs.version }}
       extension-name: ${{ needs.package.outputs.extension-name }}
@@ -63,7 +63,7 @@ jobs:
     name: Back-merge
     needs: release
     if: ${{ needs.release.outputs.should-publish == 'true' }}
-    uses: FloRobart/Github-ci/.github/workflows/back-merge.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/back-merge.yml@v1
     with:
       released-version: ${{ needs.release.outputs.version }}
       project-type: extension

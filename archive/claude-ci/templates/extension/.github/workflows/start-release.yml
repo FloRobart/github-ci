@@ -23,7 +23,7 @@ permissions:
 jobs:
   start:
     name: Start release
-    uses: FloRobart/Github-ci/.github/workflows/start-release-or-hotfix.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/start-release-or-hotfix.yml@v1
     with:
       kind: release
       bump: ${{ inputs.bump }}

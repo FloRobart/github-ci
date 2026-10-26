@@ -58,7 +58,7 @@ jobs:
   gitflow-checks:
     name: Gitflow
     if: github.event_name == 'pull_request'
-    uses: FloRobart/Github-ci/.github/workflows/gitflow-checks.yml@main
+    uses: FloRobart/github-ci/.github/workflows/gitflow-checks.yml@main
 
   quality:
     name: Quality
@@ -114,7 +114,7 @@ jobs:
     name: Prepare release
     if: github.event_name != 'pull_request'
     needs: quality
-    uses: FloRobart/Github-ci/.github/workflows/gitflow-prepare-release.yml@main
+    uses: FloRobart/github-ci/.github/workflows/gitflow-prepare-release.yml@main
     with:
       project-type: extension
 
@@ -194,7 +194,7 @@ jobs:
   publish-release:
     name: Publish release
     needs: [prepare-release, extension-archive]
-    uses: FloRobart/Github-ci/.github/workflows/gitflow-publish-release.yml@main
+    uses: FloRobart/github-ci/.github/workflows/gitflow-publish-release.yml@main
     secrets: inherit
     permissions:
       contents: write

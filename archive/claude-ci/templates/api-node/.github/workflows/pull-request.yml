@@ -21,12 +21,12 @@ concurrency:
 jobs:
   policy:
     name: Policy
-    uses: FloRobart/Github-ci/.github/workflows/pull-request-policy.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/pull-request-policy.yml@v1
     with:
       project-type: node
 
   quality:
     name: Quality
-    uses: FloRobart/Github-ci/.github/workflows/node-quality.yml@v1
+    uses: FloRobart/github-ci/.github/workflows/node-quality.yml@v1
     with:
       node-version: '24'

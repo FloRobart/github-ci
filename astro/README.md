@@ -49,7 +49,7 @@ Pour appeler directement cette CI :
 ```yaml
 jobs:
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/astro.yml@main
+    uses: FloRobart/github-ci/.github/workflows/astro.yml@main
     secrets: inherit
 ```
 

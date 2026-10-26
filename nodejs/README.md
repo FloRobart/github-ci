@@ -72,7 +72,7 @@ Pour appeler directement cette CI :
 ```yaml
 jobs:
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/nodejs.yml@main
+    uses: FloRobart/github-ci/.github/workflows/nodejs.yml@main
     secrets: inherit
 ```
 
@@ -89,7 +89,7 @@ Le fichier d'exemple donne la permission `id-token: write`. Elle sert au trusted
 ```yaml
 jobs:
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/nodejs.yml@main
+    uses: FloRobart/github-ci/.github/workflows/nodejs.yml@main
     secrets: inherit
     with:
       node-version: '22'

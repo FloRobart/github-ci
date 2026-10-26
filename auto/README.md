@@ -40,7 +40,7 @@ Le job **Detect** écrit le type trouvé dans le résumé du run. Un projet refu
 ```yaml
 jobs:
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/auto.yml@main
+    uses: FloRobart/github-ci/.github/workflows/auto.yml@main
     secrets: inherit
 ```
 
@@ -66,7 +66,7 @@ Une option rend le `ci.yml` différent des autres projets : ne l'ajouter que si 
 ```yaml
 jobs:
   ci:
-    uses: FloRobart/Github-ci/.github/workflows/auto.yml@main
+    uses: FloRobart/github-ci/.github/workflows/auto.yml@main
     secrets: inherit
     with:
       flutter-version: '3.35.0'
