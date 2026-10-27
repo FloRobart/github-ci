@@ -113,7 +113,7 @@ dependencies:
 
 ### pub.dev
 
-Après la GitHub Release d'une version finale, la CI écrit la version calculée dans le `pubspec.yaml` (sans le commiter), puis lance `flutter pub publish`. Le job est ignoré, avec un message, quand :
+Le `pubspec.yaml` commité porte déjà la version, écrite par la CI sur la branche de release (voir [gitflow/README.md](../gitflow/README.md#les-fichiers-de-version)). Après la GitHub Release d'une version finale, la CI retire le build number `+N` de la copie publiée, puis lance `flutter pub publish`. Le job est ignoré, avec un message, quand :
 
 - le secret `PUB_DEV_SERVICE_ACCOUNT_JSON` n'existe pas ;
 - le dépôt n'est pas public : le code d'un dépôt privé ne part jamais sur pub.dev ;

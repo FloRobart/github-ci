@@ -450,8 +450,9 @@ jobs:
           flutter-version: ${{ inputs.flutter-version }}
           cache: true
 
-      # pub.dev publishes the version written in pubspec.yaml. Only the copy built by the
-      # CI carries it: pubspec.yaml is not committed.
+      # pub.dev publishes the version written in pubspec.yaml. The committed file already
+      # carries it (written on the release branch), with a possible "+N" build number that
+      # pub.dev does not need: the copy published here gets the bare version.
       - name: Set the version in pubspec.yaml
         if: steps.publication.outputs.configured == 'true'
         run: |

@@ -183,7 +183,8 @@ jobs:
       - name: Install the dependencies
         run: npm ci
 
-      # Only the copy built by the CI carries the version: package.json is not committed.
+      # The committed package.json carries "X.Y.Z", written on the release branch. A release
+      # candidate is published as "X.Y.Z-rc.N": only the copy built here carries that suffix.
       - name: Set the version
         run: npm version "${VERSION}" --no-git-tag-version --allow-same-version --ignore-scripts
 

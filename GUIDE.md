@@ -106,7 +106,7 @@ La CI échoue si un prérequis manque. Fais-le sur ta branche de travail en loca
 
 - Nom scopé en minuscules : `"name": "@florobart/mon-projet"`.
 - Champs `main` (ou `exports`), `types`, `files` et `repository`.
-- La `version` du `package.json` n'a pas d'importance, la CI la remplace.
+- La `version` du `package.json` est tenue par la CI : elle l'écrit sur la branche de release, ne pas la modifier à la main.
 
 **En plus, pour une extension** :
 

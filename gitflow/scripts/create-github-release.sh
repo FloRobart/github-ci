@@ -7,8 +7,8 @@
 #
 # Nothing happens when the release already exists, so a failed run can simply be re-run.
 #
-# Usage: create-github-release.sh <tag> <kind> <previous tag or ""> [assets directory]
-# Needs GH_TOKEN, GH_REPO ("owner/repository") and GITHUB_SHA (the commit to tag).
+# Usage: create-github-release.sh <tag> <kind> <previous tag or ""> <commit to tag> [assets directory]
+# Needs GH_TOKEN and GH_REPO ("owner/repository").
 
 set -o errexit -o nounset -o pipefail
 
@@ -16,14 +16,15 @@ main() {
     local tag="$1"
     local kind="$2"
     local previous_tag="$3"
-    local assets_directory="${4:-}"
+    local target_commit="$4"
+    local assets_directory="${5:-}"
 
     if gh release view "${tag}" > /dev/null 2>&1; then
         echo "::notice title=Release déjà créée::${tag} existe déjà, elle est conservée."
         return
     fi
 
-    local release_options=(--target "${GITHUB_SHA}" --title "${GH_REPO#*/} ${tag}" --generate-notes)
+    local release_options=(--target "${target_commit}" --title "${GH_REPO#*/} ${tag}" --generate-notes)
 
     if [ -n "${previous_tag}" ]; then
         release_options+=(--notes-start-tag "${previous_tag}")

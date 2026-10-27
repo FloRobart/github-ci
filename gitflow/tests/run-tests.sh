@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Tests of the gitflow scripts, run on throwaway git repositories.
-# No network, no GitHub: only the scripts that read the git history are tested.
+# No network, no GitHub: only the scripts that work with git alone are tested, a local
+# bare repository standing for GitHub. Needs jq and npm.
 #
 # Usage: gitflow/tests/run-tests.sh
 
@@ -318,6 +319,96 @@ test_plan_release() {
     assert_fails 'push hors de main refusé' env EVENT_NAME=push BRANCH_NAME=dev plan-release.sh
 }
 
+# Writes a Node.js project (package.json and its lockfile) and a Flutter one (pubspec.yaml)
+# at the given version, in the current directory.
+write_project_files() {
+    local version="$1"
+
+    printf '{\n    "name": "demo",\n    "version": "%s"\n}\n' "${version}" > package.json
+    printf '{\n  "name": "demo",\n  "version": "%s",\n  "lockfileVersion": 3,\n  "packages": {\n    "": { "name": "demo", "version": "%s" }\n  }\n}\n' "${version}" "${version}" > package-lock.json
+    printf 'name: demo\nversion: %s+7 # build number kept\n\nenvironment:\n  sdk: ^3.0.0\n' "${version}" > pubspec.yaml
+}
+
+test_write_version_files() {
+    echo 'write-version-files.sh'
+
+    move_into_new_project
+    write_project_files '0.0.0'
+    write-version-files.sh '1.5.0'
+    assert_equals 'package.json' '1.5.0' "$(jq --raw-output '.version' package.json)"
+    assert_equals 'indentation de package.json conservée' '    "version": "1.5.0"' "$(grep '"version"' package.json)"
+    assert_equals 'package-lock.json' '1.5.0' "$(jq --raw-output '.version' package-lock.json)"
+    assert_equals 'package-lock.json, packages[""]' '1.5.0' "$(jq --raw-output '.packages[""].version' package-lock.json)"
+    assert_equals 'pubspec.yaml, build number conservé' 'version: 1.5.0+7' "$(grep '^version:' pubspec.yaml)"
+
+    printf 'name: demo\n' > pubspec.yaml
+    write-version-files.sh '1.5.0'
+    assert_equals 'pubspec.yaml sans version : ligne ajoutée' 'version: 1.5.0' "$(grep '^version:' pubspec.yaml)"
+
+    move_into_new_project Dockerfile
+    assert_succeeds 'aucun fichier de version : rien à faire' write-version-files.sh '1.5.0'
+}
+
+test_check_version_files() {
+    echo 'check-version-files.sh'
+    create_project 'check-version-files'
+
+    write_project_files '1.5.0'
+    git add --all
+    commit 'chore: add the version files'
+    assert_succeeds 'fichiers à jour acceptés' check-version-files.sh '1.5.0'
+    assert_fails 'fichiers en retard refusés' check-version-files.sh '1.6.0'
+
+    jq '.packages[""].version = "1.4.0"' package-lock.json > package-lock.tmp && mv package-lock.tmp package-lock.json
+    git commit --quiet --all --message 'chore: lockfile left behind'
+    assert_fails 'packages[""] en retard refusé' check-version-files.sh '1.5.0'
+    assert_succeeds 'lecture depuis une référence git' check-version-files.sh '1.5.0' HEAD~1
+
+    git rm --quiet package.json package-lock.json pubspec.yaml
+    commit 'chore: remove the version files'
+    assert_succeeds 'aucun fichier de version : accepté' check-version-files.sh '1.5.0'
+}
+
+test_commit_version_files() {
+    echo 'commit-version-files.sh'
+    create_project 'commit-version-files'
+
+    write_project_files '0.0.0'
+    git add --all
+    commit 'feat: first feature'
+    git push --quiet origin dev
+    local built_commit
+    built_commit=$(git rev-parse HEAD)
+
+    local output
+    output=$(commit-version-files.sh 'release/v1.0.0' '1.0.0' 2> /dev/null)
+    local version_commit="${output#commit=}"
+    assert_equals 'branche créée sur le commit de version' "${version_commit}" "$(git ls-remote --heads origin release/v1.0.0 | cut -f 1)"
+    assert_equals 'commit de version posé sur le commit construit' "${built_commit}" "$(git rev-parse "${version_commit}^")"
+    assert_equals 'message du commit de version' 'chore(release): v1.0.0' "$(git log -1 --format=%s "${version_commit}")"
+    assert_succeeds 'fichiers de la branche à jour' check-version-files.sh '1.0.0' "${version_commit}"
+
+    git checkout --quiet "${built_commit}"
+    output=$(commit-version-files.sh 'release/v1.0.0' '1.0.0' 2> /dev/null)
+    assert_equals 'relance : commit de version conservé' "commit=${version_commit}" "${output}"
+
+    git checkout --quiet "${version_commit}"
+    output=$(commit-version-files.sh 'release/v1.0.0' '1.0.0' 2> /dev/null)
+    assert_equals 'fichiers déjà à jour : commit construit' "commit=${version_commit}" "${output}"
+    assert_equals 'fichiers déjà à jour : branche inchangée' "${version_commit}" "$(git ls-remote --heads origin release/v1.0.0 | cut -f 1)"
+
+    git switch --quiet --create hotfix/crash "${built_commit}"
+    git push --quiet origin hotfix/crash
+    output=$(commit-version-files.sh 'hotfix/crash' '0.1.1' 2> /dev/null)
+    assert_equals 'branche existante sur le commit construit : commit de version poussé' "${output#commit=}" "$(git ls-remote --heads origin hotfix/crash | cut -f 1)"
+
+    git switch --quiet --create fix/moved "${built_commit}"
+    commit 'fix: pushed during the run'
+    git push --quiet origin HEAD:refs/heads/hotfix/moved
+    git checkout --quiet "${built_commit}"
+    assert_fails 'branche modifiée pendant le run : refusé' commit-version-files.sh 'hotfix/moved' '0.1.1'
+}
+
 test_image_name
 test_flutter_project_detection
 test_node_project_detection
@@ -327,6 +418,9 @@ test_pull_request_branches
 test_commit_messages
 test_next_version
 test_plan_release
+test_write_version_files
+test_check_version_files
+test_commit_version_files
 
 echo
 if [ "${failed_test_count}" -gt 0 ]; then

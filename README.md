@@ -103,7 +103,7 @@ archive/                    Anciennes versions, conservées pour mémoire
 gitflow/tests/run-tests.sh
 ```
 
-Les tests créent des dépôts git et des projets jetables, et vérifient la détection du type de projet, le calcul de version, les règles de branches, les messages de commit et le plan de release. Ils n'ont besoin ni de réseau ni de GitHub, seulement de `jq`.
+Les tests créent des dépôts git et des projets jetables, et vérifient la détection du type de projet, le calcul de version, les règles de branches, les messages de commit, le plan de release et l'écriture de la version dans les fichiers du projet. Ils n'ont besoin ni de réseau ni de GitHub, seulement de `jq` et `npm`.
 
 Lint, avec [shellcheck](https://github.com/koalaman/shellcheck) et [actionlint](https://github.com/rhysd/actionlint) installés :
 
@@ -117,7 +117,7 @@ actionlint .github/workflows/*.yml ./*/example/ci.yml
 
 [self-tests.yml](.github/workflows/self-tests.yml) lance ces trois contrôles sur chaque pull request de ce dépôt et sur `main`. Il n'a pas de `workflow_call` : les projets qui importent Github-ci ne le lancent jamais. Il teste le code de la pull request elle-même, jamais la version `@main`.
 
-Ne sont pas couverts : l'enchaînement réel des workflows réutilisables appelés par un projet, les scripts qui écrivent sur GitHub (`create-branch.sh`, `open-pull-request.sh`, `create-github-release.sh`) et les envois aux stores (Google Play, pub.dev, Chrome Web Store, addons.mozilla.org). Seul un vrai projet de test les vérifie.
+Ne sont pas couverts : l'enchaînement réel des workflows réutilisables appelés par un projet, les scripts qui passent par l'API GitHub (`open-pull-request.sh`, `create-github-release.sh`) et les envois aux stores (Google Play, pub.dev, Chrome Web Store, addons.mozilla.org). Seul un vrai projet de test les vérifie.
 
 ## Séparer en plusieurs dépôts plus tard
 
