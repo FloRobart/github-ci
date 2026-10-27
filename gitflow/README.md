@@ -41,12 +41,24 @@ Onglet **Actions** → **CI** → **Run workflow**. Ce qu'il fait dépend de la 
 
 | Branche | Résultat |
 |---|---|
-| `dev` | Release candidate `vX.Y.Z-rc.1` : image Docker, pre-release GitHub, création de `release/vX.Y.Z` et de sa pull request vers `main` |
+| `dev` | Release candidate `vX.Y.Z-rc.1` : image Docker, pre-release GitHub, création de `release/vX.Y.Z` avec la version `X.Y.Z` écrite dans ses fichiers, et de sa pull request vers `main` |
 | `release/vX.Y.Z` | Release candidate suivante, `vX.Y.Z-rc.2`, `rc.3`… |
-| `hotfix/*` | Release candidate du hotfix, par exemple `v1.4.3-rc.1` |
+| `hotfix/*` | Release candidate du hotfix, par exemple `v1.4.3-rc.1`, avec la version `1.4.3` écrite dans les fichiers de la branche |
 | Autre | Refusé |
 
 Une release candidate n'est publiée que par ce bouton. Sur `dev`, il faut aussi que `main` soit déjà mergée dans `dev` (pull request de back-merge mergée).
+
+## Les fichiers de version
+
+Le `package.json`, le `package-lock.json` et le `pubspec.yaml` suivent les versions publiées : la CI y écrit la version, et `main` la porte dès que la release ou le hotfix y est mergé. Le back-merge la ramène ensuite dans `dev`.
+
+- **Quand** : à chaque bouton, sur la branche qui sera mergée dans `main`. Sur `dev`, c'est la branche `release/vX.Y.Z` créée par le bouton. Sur `release/*` ou `hotfix/*`, c'est cette branche, seulement si ses fichiers ne portent pas encore la version.
+- **Comment** : un commit `chore(release): vX.Y.Z` de `github-actions[bot]`, posé sur le commit construit. Le type `chore` ne change jamais la version calculée. La release candidate est taguée sur ce commit.
+- **Quelle version** : la version finale `X.Y.Z`, jamais `-rc.N`. Une release candidate porte son suffixe dans la copie construite seulement (paquet npm, extension).
+- **Quels fichiers** : ceux qui existent. `package.json` et `package-lock.json` passent par `npm version`, qui garde l'indentation. Dans `pubspec.yaml`, le build number `+N` est conservé (`1.4.0+12` → `1.5.0+12`) : la CI passe le sien au build Android.
+- **Garde-fou** : une pull request `release/vX.Y.Z` ou `hotfix/*` vers `main` est bloquée tant que ces fichiers ne portent pas la version que son merge publiera.
+
+Un hotfix doit donc passer par le bouton au moins une fois avant son merge, ou recevoir la version à la main. Le commit de version arrive sur la branche distante : faire `git pull` avant de pousser la suite.
 
 ## Calcul de la version
 
@@ -141,7 +153,7 @@ Settings → Secrets and variables → Actions :
 | `PUB_DEV_SERVICE_ACCOUNT_JSON` | Librairie Flutter : publication sur pub.dev. Voir [flutter/README.md](../flutter/README.md#pubdev). |
 | `CHROME_*`, `FIREFOX_*` | Extension : envoi au Chrome Web Store et sur addons.mozilla.org. Voir [extension/README.md](../extension/README.md#les-stores). |
 
-**Pourquoi `GITFLOW_TOKEN` ?** GitHub ne lance aucun workflow sur une pull request ouverte avec le jeton par défaut des Actions. Sans ce secret, les vérifications des pull requests de release et de back-merge ne démarrent pas : il faut fermer puis rouvrir la pull request pour les lancer. Pour l'éviter, créer un *fine-grained personal access token* (Settings du compte → Developer settings) limité au projet, avec **Contents** et **Pull requests** en lecture et écriture, et l'enregistrer dans ce secret.
+**Pourquoi `GITFLOW_TOKEN` ?** GitHub ne lance aucun workflow sur une pull request ouverte, ou sur un commit poussé (le commit de version d'un hotfix), avec le jeton par défaut des Actions. Sans ce secret, les vérifications des pull requests de release et de back-merge ne démarrent pas : il faut fermer puis rouvrir la pull request pour les lancer. Pour l'éviter, créer un *fine-grained personal access token* (Settings du compte → Developer settings) limité au projet, avec **Contents** et **Pull requests** en lecture et écriture, et l'enregistrer dans ce secret.
 
 ### 3. Un projet qui a déjà une version
 
@@ -166,7 +178,7 @@ Ses messages de commit doivent suivre Conventional Commits. Dans `.github/depend
 5. **Resynchroniser** : merger la pull request de back-merge `main` → `dev`.
 6. **Déployer** à la main sur le serveur, avec l'image `X.Y.Z`.
 
-Pour un **hotfix** : créer `hotfix/description` depuis `main`, corriger avec des commits `fix: …`, éventuellement bouton sur la branche pour une release candidate, puis pull request vers `main`. Le merge publie la version corrective et ouvre le back-merge.
+Pour un **hotfix** : créer `hotfix/description` depuis `main`, corriger avec des commits `fix: …`, bouton sur la branche (release candidate et version écrite dans les fichiers), puis pull request vers `main`. Le merge publie la version corrective et ouvre le back-merge.
 
 Si une publication échoue en cours de route, relancer le run (**Re-run failed jobs**) : chaque étape reprend là où elle s'était arrêtée sans rien dupliquer.
 
@@ -178,10 +190,10 @@ Ils sont dans [.github/workflows](../.github/workflows) à la racine du dépôt,
 
 | Fichier | Rôle |
 |---|---|
-| [gitflow-checks.yml](../.github/workflows/gitflow-checks.yml) | Pull request : règles de branches, messages de commit, version d'une release |
+| [gitflow-checks.yml](../.github/workflows/gitflow-checks.yml) | Pull request : règles de branches, messages de commit, version d'une release, fichiers de version |
 | [gitflow-prepare-release.yml](../.github/workflows/gitflow-prepare-release.yml) | Bouton ou merge sur `main` : décide quoi publier (version, tag, branche à créer, application, librairie ou extension). N'écrit rien. |
 | [gitflow-docker-image.yml](../.github/workflows/gitflow-docker-image.yml) | Construit l'image d'une application une fois et la pousse sur GHCR et Docker Hub |
-| [gitflow-publish-release.yml](../.github/workflows/gitflow-publish-release.yml) | Branche de release et sa pull request, tag et GitHub Release, back-merge |
+| [gitflow-publish-release.yml](../.github/workflows/gitflow-publish-release.yml) | Version écrite dans les fichiers, branche de release et sa pull request, tag et GitHub Release, back-merge |
 
 Ordre d'appel par une CI de type : `gitflow-checks` en parallèle de la qualité sur une pull request, sinon qualité → `prepare-release` → builds → `publish-release`. Rien n'est tagué ni publié sur GitHub tant que tous les builds n'ont pas réussi.
 
@@ -199,7 +211,9 @@ Ordre d'appel par une CI de type : `gitflow-checks` en parallèle de la qualité
 | [plan-release.sh](scripts/plan-release.sh) | Ce que le run publie |
 | [to-image-name.sh](scripts/to-image-name.sh) | Nom de l'image depuis le nom du dépôt |
 | [detect-project.sh](scripts/detect-project.sh) | CI de type à lancer et ce qu'elle publie, depuis le `pubspec.yaml`, le `package.json`, le `Dockerfile` et le suffixe du nom |
-| [create-branch.sh](scripts/create-branch.sh) | Crée une branche sur GitHub |
+| [write-version-files.sh](scripts/write-version-files.sh) | Écrit une version dans `package.json`, `package-lock.json` et `pubspec.yaml` |
+| [commit-version-files.sh](scripts/commit-version-files.sh) | Pousse la version écrite sur une branche de release ou de hotfix, en créant la branche si besoin |
+| [check-version-files.sh](scripts/check-version-files.sh) | Les fichiers de version portent la version attendue |
 | [open-pull-request.sh](scripts/open-pull-request.sh) | Ouvre une pull request si elle n'existe pas encore |
 | [create-github-release.sh](scripts/create-github-release.sh) | Tag et GitHub Release |
 
@@ -214,6 +228,8 @@ Tests : `gitflow/tests/run-tests.sh`.
 | « main non mergée dans dev » | Merger la pull request de back-merge `main` → `dev` avant de relancer le bouton. |
 | « Release déjà en cours » | Publier ou abandonner la release en cours. |
 | « Rien à publier » | Aucun commit depuis la dernière version. |
+| « Fichiers de version en retard » | La branche vers `main` n'a pas la version dans ses fichiers : lancer le bouton dessus, ou les mettre à jour à la main. Arrive après un hotfix sans bouton, ou une branche de release créée à la main. |
+| « Branche modifiée pendant le run » | Un commit a été poussé sur la branche pendant le run, alors que la version devait y être écrite : relancer le bouton sur la branche. |
 | « Projet non reconnu » | Ni `pubspec.yaml` ni `package.json` à la racine du projet, et pas de suffixe `-database`. |
 | « Librairie avec un Dockerfile » | Un dépôt `…-lib` a un `Dockerfile` : le supprimer, ou renommer le dépôt en `…-app`. |
 | « Extension Flutter » | Un dépôt `…-extension` a un `pubspec.yaml` : une extension se construit avec npm. |

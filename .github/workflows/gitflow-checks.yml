@@ -5,6 +5,8 @@ name: Gitflow checks
 #   1. Branch flow       feature/* → dev, release/vX.Y.Z or hotfix/* → main, main → dev
 #   2. Commit messages   Conventional Commits, because the version is computed from them
 #   3. Release version   a release/vX.Y.Z branch must carry the version given by its commits
+#   4. Version files     towards main, package.json, package-lock.json and pubspec.yaml must
+#                        carry the version that the merge will publish
 #
 # Called on "pull_request" events only. Every check runs even when a previous one
 # failed, so every problem is reported at once.
@@ -48,3 +50,14 @@ jobs:
       - name: Check the release version
         if: ${{ !cancelled() && startsWith(github.head_ref, 'release/') }}
         run: check-release-branch-version.sh "${SOURCE_BRANCH}" "${HEAD_COMMIT}"
+
+      # The version of a release comes from its branch name, the version of a hotfix from its commits.
+      - name: Check the version files
+        if: ${{ !cancelled() && github.base_ref == 'main' && (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) }}
+        run: |
+          case "${SOURCE_BRANCH}" in
+            release/*) expected_version="${SOURCE_BRANCH#release/v}" ;;
+            *) expected_version=$(compute-next-version.sh "${HEAD_COMMIT}") ;;
+          esac
+
+          check-version-files.sh "${expected_version}" "${HEAD_COMMIT}"

@@ -40,3 +40,9 @@ list_final_version_tags() {
 find_last_version_tag() {
     list_final_version_tags | tail -n 1
 }
+
+# Prints the "version:" value of a pubspec.yaml read on the standard input, for example
+# "1.4.0+12", without quotes nor comment. Prints nothing when there is no version line.
+read_pubspec_version() {
+    sed --quiet --regexp-extended "/^version:/ { s/^version:[[:space:]]*['\"]?([^'\"[:space:]#]*).*/\1/p; q }"
+}

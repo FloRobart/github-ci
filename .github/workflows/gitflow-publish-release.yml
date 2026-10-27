@@ -3,16 +3,21 @@ name: Gitflow publish release
 # Reusable workflow (owner: gitflow/): publishes the version planned by
 # gitflow-prepare-release.yml, once every build has succeeded.
 #
-#   Release candidate from dev   →  branch release/vX.Y.Z, pull request towards main, pre-release
-#   Other release candidate      →  pre-release
+#   Release candidate from dev   →  branch release/vX.Y.Z, version written in its files,
+#                                   pull request towards main, pre-release
+#   Other release candidate      →  version written in the files of the branch when needed, pre-release
 #   Final version (main)         →  release, pull request main → dev (back-merge)
+#
+# The version files (package.json, package-lock.json, pubspec.yaml) get the final version
+# "X.Y.Z" on the release or hotfix branch, so main carries it once the branch is merged.
+# A release candidate is tagged on that version commit.
 #
 # Every step accepts to run twice, so a failed run can simply be re-run.
 #
 # GITFLOW_TOKEN is an optional personal access token, passed with "secrets: inherit".
-# GitHub starts no workflow on a pull request opened with the default token: without
-# it, the checks of the release and back-merge pull requests must be started by
-# closing and reopening them.
+# GitHub starts no workflow on a pull request opened, or on a commit pushed, with the
+# default token: without it, the checks of the release and back-merge pull requests must
+# be started by closing and reopening them.
 
 on:
   workflow_call:
@@ -65,13 +70,27 @@ jobs:
       - name: Load the gitflow scripts
         uses: FloRobart/github-ci/gitflow/scripts@main
 
-      #===================================#
-      # Release candidate: release branch #
-      #===================================#
+      #==================================================#
+      # Release candidate: version files, release branch #
+      #==================================================#
 
-      - name: Create the release branch
-        if: inputs.new-release-branch != ''
-        run: create-branch.sh "${NEW_RELEASE_BRANCH}" "${GITHUB_SHA}"
+      # The credentials are kept: the next step pushes the version commit.
+      - name: Checkout the full history
+        if: inputs.kind == 'candidate'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITFLOW_TOKEN || github.token }}
+          persist-credentials: true
+
+      # The button on dev writes on the release branch it creates, the button on
+      # release/* or hotfix/* writes on that branch.
+      - name: Write the version in the project files
+        id: version-files
+        if: inputs.kind == 'candidate'
+        env:
+          VERSION_BRANCH: ${{ inputs.new-release-branch || github.ref_name }}
+        run: commit-version-files.sh "${VERSION_BRANCH}" "${VERSION%%-*}" >> "${GITHUB_OUTPUT}"
 
       - name: Open the release pull request
         if: inputs.new-release-branch != ''
@@ -98,10 +117,12 @@ jobs:
           name: release-assets
           path: release-assets
 
+      # A release candidate is tagged on its version commit, a final version on the merge into main.
       - name: Create the GitHub Release
         env:
+          TARGET_COMMIT: ${{ steps.version-files.outputs.commit || github.sha }}
           ASSETS_DIRECTORY: ${{ inputs.release-assets && 'release-assets' || '' }}
-        run: create-github-release.sh "${TAG}" "${KIND}" "${PREVIOUS_TAG}" "${ASSETS_DIRECTORY}"
+        run: create-github-release.sh "${TAG}" "${KIND}" "${PREVIOUS_TAG}" "${TARGET_COMMIT}" "${ASSETS_DIRECTORY}"
 
       #===========================#
       # Final version: back-merge #

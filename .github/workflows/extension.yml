@@ -145,7 +145,8 @@ jobs:
         run: npm ci
 
       # Some build tools (WXT, CRXJS…) copy the version of package.json into the manifest.
-      # Only the copy built by the CI carries it: package.json is not committed.
+      # The committed package.json carries "X.Y.Z", written on the release branch: this
+      # step adds the "-rc.N" suffix of a release candidate, in the copy built here only.
       - name: Set the version in package.json
         run: npm version "${VERSION}" --no-git-tag-version --allow-same-version --ignore-scripts
 

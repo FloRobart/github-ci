@@ -58,7 +58,7 @@ Un projet avec un `Dockerfile` qui dépend d'`astro` est un site [Astro](../astr
 - Un script `build` dans `package.json`, lancé par la qualité puis juste avant la publication, par exemple `"build": "tsc"`.
 - Un nom scopé au propriétaire du dépôt, en minuscules : `@florobart/mon-projet`. GitHub Packages refuse tout autre nom.
 - Les champs habituels d'un paquet : `main` ou `exports`, `types`, `files` (ce qui part dans le paquet), et `repository`, qui relie le paquet au dépôt sur GitHub.
-- La version de `package.json` n'a pas d'importance : la CI la remplace par la version calculée, sans rien commiter.
+- La version de `package.json` est tenue par la CI : elle écrit la version calculée dans `package.json` et `package-lock.json` sur la branche de release (voir [gitflow/README.md](../gitflow/README.md#les-fichiers-de-version)). Une release candidate est publiée en `X.Y.Z-rc.N`, suffixe ajouté dans la copie construite seulement.
 
 ## Installation
 

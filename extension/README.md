@@ -100,7 +100,7 @@ Comme pour Astro, l'extension est construite dès la pull request : un build cas
 
 ## La version
 
-La version du `manifest.json` commité n'a pas d'importance. La CI écrit la version calculée dans le `package.json` avant le build (certains outils, comme WXT, la recopient dans le manifest), puis dans le `manifest.json` construit :
+Le `package.json` commité porte la version, écrite par la CI sur la branche de release (voir [gitflow/README.md](../gitflow/README.md#les-fichiers-de-version)). La version d'un `manifest.json` source n'a pas d'importance. Avant le build, la CI écrit la version complète (`-rc.N` compris) dans la copie construite du `package.json` (certains outils, comme WXT, la recopient dans le manifest), puis dans le `manifest.json` construit :
 
 | | Release candidate | Version finale |
 |---|---|---|
