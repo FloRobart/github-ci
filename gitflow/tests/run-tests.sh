@@ -41,6 +41,22 @@ assert_equals() {
     failed_test_count=$((failed_test_count + 1))
 }
 
+assert_contains() {
+    local description="$1"
+    local expected_part="$2"
+    local actual="$3"
+
+    if [[ "${actual}" == *"${expected_part}"* ]]; then
+        echo "  ✔ ${description}"
+        return
+    fi
+
+    echo "  ✘ ${description}"
+    echo "      attendu dans : ${actual}"
+    echo "      texte cherché : ${expected_part}"
+    failed_test_count=$((failed_test_count + 1))
+}
+
 assert_succeeds() {
     local description="$1"
     shift
@@ -139,6 +155,56 @@ test_flutter_project_detection() {
 
     move_into_new_project pubspec.yaml package.json
     assert_equals 'pubspec.yaml prioritaire sur package.json' "$(expected_project flutter application false)" "$(detect-project.sh 'floraccess-app')"
+}
+
+# Writes a pubspec.yaml with the given "environment:" block lines around the other "flutter:"
+# keys of a real file, which must never be taken for the version.
+write_pubspec_with_environment() {
+    local environment_lines="$1"
+
+    printf 'name: demo\n\nenvironment:\n  sdk: ^3.0.0\n%b\ndependencies:\n  flutter:\n    sdk: flutter\n\nflutter:\n  uses-material-design: true\n' "${environment_lines}" > pubspec.yaml
+}
+
+test_flutter_version_resolution() {
+    echo 'resolve-flutter-version.sh'
+
+    local warning_title='::warning title=Version de Flutter non fixée::'
+    move_into_new_project
+
+    write_pubspec_with_environment '  flutter: 3.47.9\n'
+    assert_equals 'version exacte, sans option' 'version=3.47.9' "$(resolve-flutter-version.sh '')"
+    assert_equals 'version exacte, sans option : aucun avertissement' '' "$(resolve-flutter-version.sh '' 2>&1 > /dev/null)"
+    assert_equals 'version exacte, avec option : option prioritaire' 'version=3.35.0' "$(resolve-flutter-version.sh '3.35.0')"
+
+    write_pubspec_with_environment "  flutter: '3.47.9' # pinned\n"
+    assert_equals 'version exacte entre guillemets, avec commentaire' 'version=3.47.9' "$(resolve-flutter-version.sh '')"
+
+    write_pubspec_with_environment '  flutter: 3.47.9\r\n'
+    assert_equals 'version exacte, fin de ligne Windows' 'version=3.47.9' "$(resolve-flutter-version.sh '')"
+
+    write_pubspec_with_environment '  flutter: ">=3.0.0 <4.0.0"\n'
+    assert_equals 'plage, sans option : dernière stable' 'version=' "$(resolve-flutter-version.sh '' 2> /dev/null)"
+    assert_contains 'plage, sans option : avertissement' "${warning_title}environment.flutter vaut « >=3.0.0 <4.0.0 »" "$(resolve-flutter-version.sh '' 2>&1 > /dev/null)"
+    assert_equals 'plage, avec option : option prioritaire' 'version=3.35.0' "$(resolve-flutter-version.sh '3.35.0')"
+    assert_equals 'plage, avec option : aucun avertissement' '' "$(resolve-flutter-version.sh '3.35.0' 2>&1 > /dev/null)"
+
+    write_pubspec_with_environment ''
+    assert_equals 'clé absente, sans option : dernière stable' 'version=' "$(resolve-flutter-version.sh '' 2> /dev/null)"
+    assert_contains 'clé absente, sans option : avertissement' "${warning_title}environment.flutter est absent" "$(resolve-flutter-version.sh '' 2>&1 > /dev/null)"
+    assert_equals 'clé absente, avec option : option prioritaire' 'version=3.35.0' "$(resolve-flutter-version.sh '3.35.0')"
+    assert_equals 'clé absente, avec option : aucun avertissement' '' "$(resolve-flutter-version.sh '3.35.0' 2>&1 > /dev/null)"
+
+    write_pubspec_with_environment '  flutter:\n'
+    assert_equals 'clé sans valeur : dernière stable' 'version=' "$(resolve-flutter-version.sh '' 2> /dev/null)"
+
+    write_pubspec_with_environment '  flutter: 3.47.0-0.1.pre\n'
+    assert_equals 'préversion : dernière stable' 'version=' "$(resolve-flutter-version.sh '' 2> /dev/null)"
+
+    write_pubspec_with_environment '  # flutter: 3.47.9\n'
+    assert_equals 'clé en commentaire : dernière stable' 'version=' "$(resolve-flutter-version.sh '' 2> /dev/null)"
+
+    rm pubspec.yaml
+    assert_equals 'pas de pubspec.yaml : dernière stable' 'version=' "$(resolve-flutter-version.sh '' 2> /dev/null)"
 }
 
 test_node_project_detection() {
@@ -411,6 +477,7 @@ test_commit_version_files() {
 
 test_image_name
 test_flutter_project_detection
+test_flutter_version_resolution
 test_node_project_detection
 test_database_project_detection
 test_unknown_project_detection
