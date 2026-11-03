@@ -5,7 +5,8 @@
 # Build #
 #=======#
 
-# Pin the same Flutter version as the CI ("flutter-version" input) for identical builds.
+# Pin the same Flutter version as the CI (environment.flutter of pubspec.yaml, or the
+# "flutter-version" input) for identical builds.
 FROM ghcr.io/cirruslabs/flutter:stable AS build
 
 WORKDIR /application

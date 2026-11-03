@@ -55,7 +55,7 @@ Toutes facultatives. Chacune est transmise à la CI de type qui s'en sert, les a
 |---|---|---|---|
 | `node-version` | `24` | Node.js, Astro, Extension | Version de Node.js |
 | `distribution-directory` | `dist` | Extension | Dossier produit par `npm run build`, qui contient le `manifest.json` |
-| `flutter-version` | Dernière stable | Flutter | Version de Flutter, par exemple `3.35.0` |
+| `flutter-version` | Version exacte du `pubspec.yaml`, sinon dernière stable | Flutter | Version de Flutter, par exemple `3.35.0`. Prioritaire sur `environment.flutter` du `pubspec.yaml` : voir [flutter/README.md → Version de Flutter](../flutter/README.md#version-de-flutter) |
 | `docker-image` | `true` | Flutter | `false` pour ne pas publier l'image web malgré le `Dockerfile` |
 | `android` | `true` | Flutter | `false` pour une application uniquement web |
 | `google-play-track` | `production` | Flutter | Piste Google Play d'une version finale : `production`, `beta`, `alpha` ou `internal` |

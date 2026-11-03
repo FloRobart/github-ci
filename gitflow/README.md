@@ -211,6 +211,7 @@ Ordre d'appel par une CI de type : `gitflow-checks` en parallèle de la qualité
 | [plan-release.sh](scripts/plan-release.sh) | Ce que le run publie |
 | [to-image-name.sh](scripts/to-image-name.sh) | Nom de l'image depuis le nom du dépôt |
 | [detect-project.sh](scripts/detect-project.sh) | CI de type à lancer et ce qu'elle publie, depuis le `pubspec.yaml`, le `package.json`, le `Dockerfile` et le suffixe du nom |
+| [resolve-flutter-version.sh](scripts/resolve-flutter-version.sh) | Version de Flutter à installer, depuis l'option `flutter-version` et le `pubspec.yaml` |
 | [write-version-files.sh](scripts/write-version-files.sh) | Écrit une version dans `package.json`, `package-lock.json` et `pubspec.yaml` |
 | [commit-version-files.sh](scripts/commit-version-files.sh) | Pousse la version écrite sur une branche de release ou de hotfix, en créant la branche si besoin |
 | [check-version-files.sh](scripts/check-version-files.sh) | Les fichiers de version portent la version attendue |
@@ -237,4 +238,5 @@ Tests : `gitflow/tests/run-tests.sh`.
 | « Dockerfile manquant » | Une application Node.js ou Astro (`…-app`), ou un projet de base de données (`…-database`), n'a pas de `Dockerfile` à la racine. |
 | « Mauvaise CI de type » | Le `ci.yml` du projet appelle une CI de type qui n'est pas celle du type détecté, par exemple `nodejs.yml` pour un site Astro : appeler `auto.yml`, ou la bonne CI. |
 | Avertissement « Librairie Flutter sans suffixe » | Un `pubspec.yaml` sans `Dockerfile` ni suffixe est traité comme une librairie. Renommer le dépôt en `…-lib` pour le confirmer, ou en `…-app` si c'est une application mobile. |
+| Avertissement « Version de Flutter non fixée » | `environment.flutter` est absent du `pubspec.yaml` ou n'est pas une version exacte : le job prend la dernière stable. Déclarer `flutter: X.Y.Z`, ou renseigner l'option `flutter-version`. |
 | Le bouton **Run workflow** n'apparaît pas | Le fichier `ci.yml` doit exister sur la branche par défaut du dépôt. |

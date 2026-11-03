@@ -29,6 +29,10 @@ name: Flutter
 # gitflow step comes from the gitflow-*.yml workflows. See flutter/README.md for the
 # project requirements.
 #
+# Every job installs the Flutter version told by gitflow/scripts/resolve-flutter-version.sh:
+# the "flutter-version" input, or else the exact version of environment.flutter in
+# pubspec.yaml, or else the latest stable version with a warning.
+#
 # Optional secrets, passed with "secrets: inherit":
 #
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
@@ -40,7 +44,7 @@ on:
   workflow_call:
     inputs:
       flutter-version:
-        description: Flutter version, for example "3.35.0". Empty means the latest stable version.
+        description: Flutter version, for example "3.35.0". Empty means the exact version (X.Y.Z) of environment.flutter in pubspec.yaml, or else the latest stable version with a warning.
         type: string
         default: ''
       docker-image:
@@ -87,15 +91,39 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Load the gitflow scripts
+        uses: FloRobart/github-ci/gitflow/scripts@main
+
+      - name: Resolve the Flutter version
+        id: flutter-version
+        env:
+          REQUESTED_FLUTTER_VERSION: ${{ inputs.flutter-version }}
+        run: resolve-flutter-version.sh "${REQUESTED_FLUTTER_VERSION}" >> "${GITHUB_OUTPUT}"
+
       - name: Set up Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
-          flutter-version: ${{ inputs.flutter-version }}
+          flutter-version: ${{ steps.flutter-version.outputs.version }}
           cache: true
 
+      # The lockfile is only enforced with a pinned Flutter: a new stable release changes the
+      # versions imposed by the SDK, which would break a project without any commit. The
+      # lockfile of example/ does not matter: only the one of the project is enforced.
       - name: Install the dependencies
-        run: flutter pub get
+        env:
+          FLUTTER_VERSION: ${{ steps.flutter-version.outputs.version }}
+        run: |
+          if [ -z "${FLUTTER_VERSION}" ]; then
+            flutter pub get
+            exit 0
+          fi
+
+          flutter pub get --enforce-lockfile --no-example
+
+          if [ -f example/pubspec.yaml ]; then
+            flutter pub get --directory=example
+          fi
 
       - name: Check the formatting
         run: dart format --output=none --set-exit-if-changed .
@@ -107,9 +135,6 @@ jobs:
         run: flutter test
 
       # The project kind tells what the release builds, so what must be built here.
-      - name: Load the gitflow scripts
-        uses: FloRobart/github-ci/gitflow/scripts@main
-
       - name: Detect the project
         id: project
         env:
@@ -207,11 +232,20 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Load the gitflow scripts
+        uses: FloRobart/github-ci/gitflow/scripts@main
+
+      - name: Resolve the Flutter version
+        id: flutter-version
+        env:
+          REQUESTED_FLUTTER_VERSION: ${{ inputs.flutter-version }}
+        run: resolve-flutter-version.sh "${REQUESTED_FLUTTER_VERSION}" >> "${GITHUB_OUTPUT}"
+
       - name: Set up Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
-          flutter-version: ${{ inputs.flutter-version }}
+          flutter-version: ${{ steps.flutter-version.outputs.version }}
           cache: true
 
       # Writes the files read by android/app/build.gradle, as described in the Flutter
@@ -442,12 +476,23 @@ jobs:
           echo "PACKAGE_NAME=${package_name}" >> "${GITHUB_ENV}"
           echo 'configured=true' >> "${GITHUB_OUTPUT}"
 
+      - name: Load the gitflow scripts
+        if: steps.publication.outputs.configured == 'true'
+        uses: FloRobart/github-ci/gitflow/scripts@main
+
+      - name: Resolve the Flutter version
+        id: flutter-version
+        if: steps.publication.outputs.configured == 'true'
+        env:
+          REQUESTED_FLUTTER_VERSION: ${{ inputs.flutter-version }}
+        run: resolve-flutter-version.sh "${REQUESTED_FLUTTER_VERSION}" >> "${GITHUB_OUTPUT}"
+
       - name: Set up Flutter
         if: steps.publication.outputs.configured == 'true'
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
-          flutter-version: ${{ inputs.flutter-version }}
+          flutter-version: ${{ steps.flutter-version.outputs.version }}
           cache: true
 
       # pub.dev publishes the version written in pubspec.yaml. The committed file already

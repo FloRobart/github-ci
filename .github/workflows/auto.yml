@@ -34,7 +34,7 @@ on:
         type: string
         default: dist
       flutter-version:
-        description: Flutter version, empty for the latest stable version (Flutter projects).
+        description: Flutter version, empty for the exact version (X.Y.Z) of environment.flutter in pubspec.yaml, or else the latest stable version with a warning (Flutter projects).
         type: string
         default: ''
       docker-image:

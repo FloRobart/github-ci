@@ -28,6 +28,7 @@ Une application mobile sans `Dockerfile` doit donc finir par `-app` : sinon elle
 
 ## Prérequis du projet
 
+- Un `pubspec.lock` versionné et cohérent, si la version de Flutter est fixée : voir [Le job qualité](#le-job-qualité).
 - Un dossier `test/` avec au moins un test : `flutter test` échoue sans lui.
 - Un code formaté par `dart format` : la qualité refuse un fichier mal formaté.
 - Pour l'image web d'une application : un `Dockerfile` à la racine qui construit **lui-même** la version web. [example/Dockerfile](example/Dockerfile) le fait en deux étapes, un build Flutter puis nginx.
@@ -57,7 +58,7 @@ Le job doit garder l'identifiant `ci` : le ruleset attend les vérifications `ci
 
 | Paramètre | Par défaut | Rôle |
 |---|---|---|
-| `flutter-version` | Dernière stable | Version de Flutter, par exemple `3.35.0`. La fixer rend les builds reproductibles. |
+| `flutter-version` | Version exacte du `pubspec.yaml`, sinon dernière stable | Version de Flutter, par exemple `3.35.0`. Voir [Version de Flutter](#version-de-flutter). |
 | `docker-image` | `true` | Publie la version web d'une application en image Docker, si elle a un `Dockerfile`. `false` pour ne pas la publier malgré le `Dockerfile`. |
 | `android` | `true` | Construit la version Android d'une application. `false` pour une application uniquement web. |
 | `google-play-track` | `production` | Piste Google Play qui reçoit une version finale : `production`, `beta` (test ouvert), `alpha` (test fermé) ou `internal` (test interne). |
@@ -74,9 +75,26 @@ jobs:
       android: false
 ```
 
+## Version de Flutter
+
+Chaque job qui installe Flutter (qualité, Android, pub.dev) applique ces règles, de haut en bas. Le `ci.yml` du projet n'a rien à changer.
+
+| Situation | Version installée |
+|---|---|
+| L'option `flutter-version` est renseignée | Cette valeur, telle quelle |
+| `environment.flutter` du `pubspec.yaml` est une version exacte (`X.Y.Z`) | Cette version |
+| `environment.flutter` est absent, ou est une plage comme `>=3.0.0` (cas d'une librairie) | La dernière stable, avec un avertissement dans le run |
+
+```yaml
+environment:
+  flutter: 3.47.9
+```
+
+La version exacte rend les builds reproductibles. Elle doit exister sur le canal `stable`, sinon le job échoue. Le `Dockerfile` n'est pas concerné : il choisit sa propre version de Flutter.
+
 ## Le job qualité
 
-1. `flutter pub get`
+1. `flutter pub get --enforce-lockfile --no-example` si la version de Flutter est fixée (`flutter pub get` dans `example/` ensuite, s'il existe), sinon `flutter pub get`
 2. `dart format --output=none --set-exit-if-changed .`
 3. `flutter analyze`
 4. `flutter test`
@@ -85,6 +103,14 @@ jobs:
    - l'image Docker, si l'option `docker-image` est active et qu'il y a un `Dockerfile` : construite mais jamais poussée.
 
 Un build Android ou un `Dockerfile` cassé est donc vu dans la pull request, et pas au moment de la release. Une librairie n'a rien à construire : `flutter analyze` compile déjà tout son code.
+
+Quand la version de Flutter est fixée (option `flutter-version` ou version exacte du `pubspec.yaml`), `--enforce-lockfile` fait échouer le job au lieu de modifier le `pubspec.lock`. Dans ces cas, lancer `flutter pub get` avec la version de Flutter de la CI, puis commiter le `pubspec.lock` :
+
+- le `pubspec.lock` n'est pas versionné ;
+- le `pubspec.lock` ne correspond plus au `pubspec.yaml` ;
+- le `pubspec.lock` a été généré avec une autre version de Flutter, qui impose d'autres versions de ses paquets.
+
+Seul le `pubspec.lock` de la racine est contrôlé : celui d'`example/` n'est pas nécessaire. Sans version fixée, le `pubspec.lock` n'est pas contrôlé : chaque nouvelle stable peut changer les versions imposées par Flutter, ce qui casserait le projet sans aucun commit.
 
 ## Librairie
 
