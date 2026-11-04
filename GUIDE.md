@@ -93,7 +93,7 @@ La CI échoue si un prérequis manque. Fais-le sur ta branche de travail en loca
    }
    ```
 
-   - Astro : `"typecheck": "astro check"` (avec `@astrojs/check` en devDependency) et `"build": "astro build"`.
+   - Astro : `"typecheck": "astro check"` (avec `@astrojs/check` en devDependency). Le `Dockerfile` construit le site : la CI ne lance pas `npm run build`.
    - Extension et librairie : un script `"build"` en plus.
    - Pas de tests ? Écrire `"test": "echo 'Aucun test'"`. Un script absent fait échouer la CI.
 3. Vérifier en local que tout passe :
