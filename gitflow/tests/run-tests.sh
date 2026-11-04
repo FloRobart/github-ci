@@ -298,7 +298,7 @@ test_next_version() {
     echo 'compute-next-version.sh'
     create_project 'next-version'
 
-    assert_equals 'sans tag : 0.1.0' '0.1.0' "$(compute-next-version.sh)"
+    assert_equals 'sans tag : 1.0.0' '1.0.0' "$(compute-next-version.sh)"
 
     git tag v1.4.2 main
     assert_fails 'aucun commit depuis le tag : refusé' compute-next-version.sh main

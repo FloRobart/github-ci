@@ -7,7 +7,7 @@
 #   new feature ("feat: ...", "feat(api): ...")                              →  minor
 #   anything else ("fix: ...", "chore: ...", "docs: ...")                    →  patch
 #
-# A project without any version tag starts at 0.1.0: its history may predate the
+# A project without any version tag starts at 1.0.0: its history may predate the
 # gitflow, so its messages are not read.
 #
 # Usage: compute-next-version.sh [git reference, "HEAD" by default]
@@ -19,7 +19,7 @@ readonly SCRIPTS_DIRECTORY
 
 source "${SCRIPTS_DIRECTORY}/common.sh"
 
-readonly FIRST_VERSION='0.1.0'
+readonly FIRST_VERSION='1.0.0'
 readonly BREAKING_CHANGE_SUBJECT_PATTERN='^[a-z]+(\([^()]+\))?!: '
 readonly BREAKING_CHANGE_FOOTER_PATTERN='^BREAKING[ -]CHANGE: '
 readonly FEATURE_SUBJECT_PATTERN='^feat(\([^()]+\))?: '

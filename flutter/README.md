@@ -152,7 +152,7 @@ Un refus de pub.dev ne bloque ni le tag ni le back-merge : corriger, puis **Re-r
 
 À configurer une fois par librairie :
 
-1. **Publier la première version à la main**, depuis le poste : pub.dev ne permet la publication automatique que d'un paquet qui existe déjà. Mettre dans le `pubspec.yaml` la version du dernier tag, ou `0.1.0` pour un projet sans tag, puis `flutter pub publish`. La CI ignorera cette version, déjà publiée.
+1. **Publier la première version à la main**, depuis le poste : pub.dev ne permet la publication automatique que d'un paquet qui existe déjà. Mettre dans le `pubspec.yaml` la version du dernier tag, ou `1.0.0` pour un projet sans tag, puis `flutter pub publish`. La CI ignorera cette version, déjà publiée.
 2. **Créer le compte de service**, dans un projet Google Cloud (le même pour toutes les librairies si tu veux) :
 
    ```bash

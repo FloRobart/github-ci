@@ -73,7 +73,7 @@ La version vient des messages de commit ajoutés depuis le dernier tag `vX.Y.Z`.
 - Types acceptés : `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`. Un commit qui n'en utilise aucun bloque la pull request.
 - Les merge commits sont ignorés.
 - Les tags de release candidate (`v1.5.0-rc.2`) sont ignorés.
-- Un projet sans aucun tag `vX.Y.Z` commence à `0.1.0`.
+- Un projet sans aucun tag `vX.Y.Z` commence à `1.0.0`.
 - Une branche `release/vX.Y.Z` doit toujours correspondre à la version que donnent ses commits. Elles divergent si un `feat` ou un changement cassant est poussé sur la release après sa création : la pull request vers `main` est alors bloquée.
 
 ## Type de projet
@@ -215,7 +215,7 @@ Ordre d'appel par une CI de type : `gitflow-checks` en parallèle de la qualité
 | [write-version-files.sh](scripts/write-version-files.sh) | Écrit une version dans `package.json`, `package-lock.json` et `pubspec.yaml` |
 | [commit-version-files.sh](scripts/commit-version-files.sh) | Pousse la version écrite sur une branche de release ou de hotfix, en créant la branche si besoin |
 | [check-version-files.sh](scripts/check-version-files.sh) | Les fichiers de version portent la version attendue |
-| [open-pull-request.sh](scripts/open-pull-request.sh) | Ouvre une pull request si elle n'existe pas encore |
+| [open-pull-request.sh](scripts/open-pull-request.sh) | Ouvre une pull request si elle n'existe pas encore et si sa branche cible existe |
 | [create-github-release.sh](scripts/create-github-release.sh) | Tag et GitHub Release |
 
 Tests : `gitflow/tests/run-tests.sh`.

@@ -93,7 +93,7 @@ La CI échoue si un prérequis manque. Fais-le sur ta branche de travail en loca
    }
    ```
 
-   - Astro : `"typecheck": "astro check"` (avec `@astrojs/check` en devDependency) et `"build": "astro build"`.
+   - Astro : `"typecheck": "astro check"` (avec `@astrojs/check` en devDependency). Le `Dockerfile` construit le site : la CI ne lance pas `npm run build`.
    - Extension et librairie : un script `"build"` en plus.
    - Pas de tests ? Écrire `"test": "echo 'Aucun test'"`. Un script absent fait échouer la CI.
 3. Vérifier en local que tout passe :
@@ -194,7 +194,7 @@ git switch -c dev && git push -u origin dev
 
 Si `dev` existe déjà, y merger `main` puis pousser.
 
-✅ **Vérification** : onglet **Actions** du dépôt → le workflow **CI** apparaît dans la liste à gauche, avec un run lancé par le push sur `main`. Il est normal que ce premier run fasse une première release s'il y a des commits `feat:`/`fix:`.
+✅ **Vérification** : onglet **Actions** du dépôt → le workflow **CI** apparaît dans la liste à gauche, avec un run lancé par le push sur `main`. Il est normal que ce premier run fasse une première release s'il y a des commits `feat:`/`fix:`. Comme `dev` n'existe pas encore à ce moment-là, ce run affiche un avertissement au lieu d'ouvrir le back-merge : c'est normal aussi, `dev` part de `main` et contient déjà cette release.
 
 ---
 
@@ -418,7 +418,7 @@ Noms de branches autorisés ensuite : `main`, `dev`, `feature/*`, `feat/*`, `bug
 
 ## Étape 8 : projet qui a déjà une version
 
-À sauter pour un nouveau projet : sa première version sera `0.1.0`.
+À sauter pour un nouveau projet : sa première version sera `1.0.0`.
 
 Pour qu'un projet existant reparte de sa version actuelle, par exemple `2.3.0` :
 

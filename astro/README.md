@@ -12,7 +12,7 @@ Le workflow est [.github/workflows/astro.yml](../.github/workflows/astro.yml). L
 
 Un site Astro est un projet avec un `package.json` qui a `astro` dans ses `dependencies` ou ses `devDependencies`, et un `Dockerfile`. Toutes les règles sont dans [gitflow/README.md → Type de projet](../gitflow/README.md#type-de-projet).
 
-**Le site est aussi construit pendant la qualité :** `astro build` trouve des erreurs qu'`astro check` ne voit pas (collections de contenu invalides, page qui plante au rendu), et il vaut mieux les voir dans la pull request qu'au moment de la release.
+**Le site est aussi construit pendant la qualité, par le `Dockerfile` :** `astro build` trouve des erreurs qu'`astro check` ne voit pas (collections de contenu invalides, page qui plante au rendu), et il vaut mieux les voir dans la pull request qu'au moment de la release. La CI ne lance pas `npm run build` en dehors du `Dockerfile` : le site est ainsi vérifié avec ses vrais réglages, comme son URL publique.
 
 ## Prérequis du projet
 
@@ -25,8 +25,7 @@ Un site Astro est un projet avec un `package.json` qui a `astro` dans ses `depen
       "lint": "eslint .",
       "format:check": "prettier --check .",
       "typecheck": "astro check",
-      "test": "vitest run",
-      "build": "astro build"
+      "test": "vitest run"
     }
   }
   ```
@@ -35,7 +34,7 @@ Un site Astro est un projet avec un `package.json` qui a `astro` dans ses `depen
 
   `format:check` ne fait que vérifier : la CI ne modifie jamais le code. Pour corriger, ajouter par exemple `"format": "prettier --write ."` et le lancer en local. Prettier formate les fichiers `.astro` avec le plugin `prettier-plugin-astro`.
 
-- Un `Dockerfile` à la racine qui construit et sert le site, par exemple un build Node.js puis nginx pour un site statique. Il reçoit la version dans l'argument de build `APP_VERSION` (facultatif).
+- Un `Dockerfile` à la racine qui construit (`astro build`) et sert le site, par exemple un build Node.js puis nginx pour un site statique. Il reçoit la version dans l'argument de build `APP_VERSION` (facultatif). La CI ne lui transmet aucun autre argument : si le site a besoin de son URL publique au build, le `Dockerfile` la définit lui-même, par exemple avec `ARG SITE_URL=https://mon-domaine.fr`.
 
 ## Installation
 
@@ -68,5 +67,4 @@ Le job doit garder l'identifiant `ci` : le ruleset attend les vérifications `ci
 3. `npm run format:check`
 4. `npm run typecheck`
 5. `npm test`
-6. `npm run build`
-7. L'image Docker, construite depuis le `Dockerfile` mais jamais poussée : un `Dockerfile` cassé est vu dans la pull request, et pas au moment de la release.
+6. L'image Docker, construite depuis le `Dockerfile` mais jamais poussée : un site ou un `Dockerfile` cassé est vu dans la pull request, et pas au moment de la release.
