@@ -23,6 +23,8 @@ name: Database
 # gitflow-*.yml workflows. See database/README.md for the project requirements.
 #
 # Optional secrets, passed with "secrets: inherit": DOCKERHUB_USERNAME and DOCKERHUB_TOKEN.
+# They publish on Docker Hub, and log in to dhi.io, required by a Dockerfile based on a
+# Docker Hardened Image.
 
 on:
   workflow_call:
@@ -80,6 +82,7 @@ jobs:
       # database on localhost.
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/migrations?sslmode=disable
       MIGRATIONS_DIRECTORY: db/migrations
+      DOCKERHUB_ENABLED: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 
     steps:
       - name: Checkout the project
@@ -117,6 +120,17 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Docker Hardened Images: dhi.io refuses anonymous pulls and uses the Docker Hub
+      # account. Without the secrets (pull request of a fork, Dependabot without its own
+      # copy of them), only a Dockerfile based on dhi.io fails to build.
+      - name: Log in to Docker Hardened Images
+        if: env.DOCKERHUB_ENABLED == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: dhi.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Same build as gitflow-docker-image.yml, loaded locally instead of pushed. The
       # cache it leaves speeds up the build of the release.

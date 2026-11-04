@@ -145,7 +145,7 @@ Settings → Secrets and variables → Actions :
 
 | Secret | Effet |
 |---|---|
-| `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Publie aussi l'image sur Docker Hub. Le token se crée dans Docker Hub → Account settings → Personal access tokens, en *Read & Write*. |
+| `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Publie aussi l'image sur Docker Hub et connecte la CI à `dhi.io`. Le token se crée dans Docker Hub → Account settings → Personal access tokens, en *Read & Write*. **Obligatoires** si le `Dockerfile` utilise `FROM dhi.io/…` : ce registre refuse les pulls anonymes. |
 | `GITFLOW_TOKEN` | Voir ci-dessous. |
 | `NPM_TOKEN` | Librairie Node.js : publie sur npmjs.com sans trusted publishing. Voir [nodejs/README.md](../nodejs/README.md#le-paquet-npm). |
 | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | Application Flutter : signe l'APK et l'AAB. Voir [flutter/README.md](../flutter/README.md#signature). |
@@ -168,6 +168,8 @@ Ses messages de commit doivent suivre Conventional Commits. Dans `.github/depend
     commit-message:
       prefix: "chore(deps)"
 ```
+
+Si le `Dockerfile` utilise `FROM dhi.io/…`, ajouter aussi `DOCKERHUB_USERNAME` et `DOCKERHUB_TOKEN` dans Settings → Secrets and variables → **Dependabot** : ses pull requests ne voient pas les secrets Actions, et le build de l'image échouerait avec `unauthorized`.
 
 ## Au quotidien
 

@@ -10,6 +10,7 @@ name: Gitflow Docker image
 # The version is given to the Dockerfile as the build argument APP_VERSION.
 #
 # Optional secrets, passed with "secrets: inherit": DOCKERHUB_USERNAME and DOCKERHUB_TOKEN.
+# They also log in to dhi.io, required by a Dockerfile based on a Docker Hardened Image.
 
 on:
   workflow_call:
@@ -96,6 +97,16 @@ jobs:
         if: env.DOCKERHUB_ENABLED == 'true'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Docker Hardened Images: dhi.io refuses anonymous pulls and uses the Docker Hub
+      # account. Without the secrets, only a Dockerfile based on dhi.io fails to build.
+      - name: Log in to Docker Hardened Images
+        if: env.DOCKERHUB_ENABLED == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: dhi.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 

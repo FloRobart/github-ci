@@ -39,6 +39,9 @@ name: Flutter
 #   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD               →  signed Android build
 #   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON                      →  Google Play
 #   PUB_DEV_SERVICE_ACCOUNT_JSON                          →  pub.dev
+#   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN                   →  Docker Hub, and the login to dhi.io
+#                                                            required by a Dockerfile based on
+#                                                            a Docker Hardened Image
 
 on:
   workflow_call:
@@ -84,6 +87,9 @@ jobs:
     runs-on: ubuntu-latest
     # The Android build and the Docker image of an application can take a while.
     timeout-minutes: 30
+
+    env:
+      DOCKERHUB_ENABLED: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 
     steps:
       - name: Checkout the project
@@ -162,6 +168,21 @@ jobs:
           && steps.project.outputs.kind == 'application'
           && steps.project.outputs.has-dockerfile == 'true'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Docker Hardened Images: dhi.io refuses anonymous pulls and uses the Docker Hub
+      # account. Without the secrets (pull request of a fork, Dependabot without its own
+      # copy of them), only a Dockerfile based on dhi.io fails to build.
+      - name: Log in to Docker Hardened Images
+        if: >-
+          env.DOCKERHUB_ENABLED == 'true'
+          && inputs.docker-image
+          && steps.project.outputs.kind == 'application'
+          && steps.project.outputs.has-dockerfile == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: dhi.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Same build as gitflow-docker-image.yml, but nothing is pushed. The cache it
       # leaves speeds up the build of the release.

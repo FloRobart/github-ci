@@ -292,6 +292,8 @@ L'image est **toujours** publiée sur GHCR (`ghcr.io/florobart/<nom>`) sans rien
    | `DOCKERHUB_USERNAME` | Ton nom d'utilisateur Docker Hub |
    | `DOCKERHUB_TOKEN` | Le token copié |
 
+**Exception : ces secrets sont obligatoires si le `Dockerfile` utilise une image Docker Hardened Images** (`FROM dhi.io/…`). `dhi.io` refuse les pulls anonymes : la CI s'y connecte avec ces deux secrets, et sans eux le build de l'image échoue avec `unauthorized`. Dans ce cas, ajouter aussi ces secrets pour Dependabot (voir [Étape 9](#étape-9--dependabot)).
+
 ### 6.2 Librairie Node.js (`…-lib`) sur npmjs.com
 
 Le paquet est **toujours** publié sur GitHub Packages. Sur npmjs.com, seulement si le dépôt est **public**.
@@ -450,6 +452,8 @@ updates:
 ```
 
 Sans ça, les pull requests de Dependabot visent `main` et leurs messages sont refusés par la CI.
+
+**Si le `Dockerfile` utilise `FROM dhi.io/…`** : les pull requests de Dependabot ne voient pas les secrets Actions, seulement les siens. Ajouter `DOCKERHUB_USERNAME` et `DOCKERHUB_TOKEN` dans **Settings → Secrets and variables → Dependabot**, sinon le build de l'image échoue avec `unauthorized`.
 
 ---
 
