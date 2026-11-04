@@ -73,7 +73,7 @@ La version vient des messages de commit ajoutés depuis le dernier tag `vX.Y.Z`.
 - Types acceptés : `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`. Un commit qui n'en utilise aucun bloque la pull request.
 - Les merge commits sont ignorés.
 - Les tags de release candidate (`v1.5.0-rc.2`) sont ignorés.
-- Un projet sans aucun tag `vX.Y.Z` commence à `0.1.0`.
+- Un projet sans aucun tag `vX.Y.Z` commence à `1.0.0`.
 - Une branche `release/vX.Y.Z` doit toujours correspondre à la version que donnent ses commits. Elles divergent si un `feat` ou un changement cassant est poussé sur la release après sa création : la pull request vers `main` est alors bloquée.
 
 ## Type de projet

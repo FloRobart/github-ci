@@ -418,7 +418,7 @@ Noms de branches autorisés ensuite : `main`, `dev`, `feature/*`, `feat/*`, `bug
 
 ## Étape 8 : projet qui a déjà une version
 
-À sauter pour un nouveau projet : sa première version sera `0.1.0`.
+À sauter pour un nouveau projet : sa première version sera `1.0.0`.
 
 Pour qu'un projet existant reparte de sa version actuelle, par exemple `2.3.0` :
 
