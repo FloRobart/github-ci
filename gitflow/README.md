@@ -215,7 +215,7 @@ Ordre d'appel par une CI de type : `gitflow-checks` en parallèle de la qualité
 | [write-version-files.sh](scripts/write-version-files.sh) | Écrit une version dans `package.json`, `package-lock.json` et `pubspec.yaml` |
 | [commit-version-files.sh](scripts/commit-version-files.sh) | Pousse la version écrite sur une branche de release ou de hotfix, en créant la branche si besoin |
 | [check-version-files.sh](scripts/check-version-files.sh) | Les fichiers de version portent la version attendue |
-| [open-pull-request.sh](scripts/open-pull-request.sh) | Ouvre une pull request si elle n'existe pas encore |
+| [open-pull-request.sh](scripts/open-pull-request.sh) | Ouvre une pull request si elle n'existe pas encore et si sa branche cible existe |
 | [create-github-release.sh](scripts/create-github-release.sh) | Tag et GitHub Release |
 
 Tests : `gitflow/tests/run-tests.sh`.

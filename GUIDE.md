@@ -194,7 +194,7 @@ git switch -c dev && git push -u origin dev
 
 Si `dev` existe déjà, y merger `main` puis pousser.
 
-✅ **Vérification** : onglet **Actions** du dépôt → le workflow **CI** apparaît dans la liste à gauche, avec un run lancé par le push sur `main`. Il est normal que ce premier run fasse une première release s'il y a des commits `feat:`/`fix:`.
+✅ **Vérification** : onglet **Actions** du dépôt → le workflow **CI** apparaît dans la liste à gauche, avec un run lancé par le push sur `main`. Il est normal que ce premier run fasse une première release s'il y a des commits `feat:`/`fix:`. Comme `dev` n'existe pas encore à ce moment-là, ce run affiche un avertissement au lieu d'ouvrir le back-merge : c'est normal aussi, `dev` part de `main` et contient déjà cette release.
 
 ---
 
