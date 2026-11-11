@@ -207,7 +207,8 @@ Si `dev` existe déjà, y merger `main` puis pousser.
 3. ✅ Cocher **Allow merge commits**.
 4. ⬜ Décocher **Allow squash merging**.
 5. ⬜ Décocher **Allow rebase merging**.
-6. ✅ Cocher **Automatically delete head branches** (un peu plus bas).
+6. ✅ Cocher **Allow auto-merge**.
+7. ✅ Cocher **Automatically delete head branches** (un peu plus bas).
 
 Pourquoi : le git flow compare les historiques de `main` et `dev`. Un squash ou un rebase crée de nouveaux commits et casse le calcul de version et le back-merge.
 
