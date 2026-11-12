@@ -226,7 +226,7 @@ Pourquoi : la CI ouvre elle-même la pull request `release/vX.Y.Z` → `main` et
 
 Même page, en haut, dans la rubrique **Actions permissions** :
 
-- ✅ Cocher **Allow all actions and reusable workflows** (ou au minimum autoriser `FloRobart/*` et les actions utilisées par la CI).
+- ✅ Cocher **Allow FloRobart, and select non-FloRobart, actions and reusable workflows**.
 - ✅ Cocher **Allow Actions Created by GitHub**.
 - Dans **Allow or block specified actions and reusable workflows**, entrer les noms des actions utilisées par la CI (elles sont listées dans le `ci.yml`).
 
