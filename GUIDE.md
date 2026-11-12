@@ -207,7 +207,8 @@ Si `dev` existe déjà, y merger `main` puis pousser.
 3. ✅ Cocher **Allow merge commits**.
 4. ⬜ Décocher **Allow squash merging**.
 5. ⬜ Décocher **Allow rebase merging**.
-6. ✅ Cocher **Automatically delete head branches** (un peu plus bas).
+6. ✅ Cocher **Allow auto-merge**.
+7. ✅ Cocher **Automatically delete head branches** (un peu plus bas).
 
 Pourquoi : le git flow compare les historiques de `main` et `dev`. Un squash ou un rebase crée de nouveaux commits et casse le calcul de version et le back-merge.
 
@@ -217,15 +218,28 @@ Pourquoi : le git flow compare les historiques de `main` et `dev`. Un squash ou 
 2. Descendre jusqu'à **Workflow permissions**.
 3. Laisser **Read repository contents and packages permissions** (le `ci.yml` demande lui-même les droits dont il a besoin).
 4. ✅ Cocher **Allow GitHub Actions to create and approve pull requests**.
-5. **Save**.
+5. Cliquer sur **Save**.
 
 Pourquoi : la CI ouvre elle-même la pull request `release/vX.Y.Z` → `main` et la pull request de back-merge `main` → `dev`.
 
 ### 4.3 Vérifier que les Actions sont activées
 
-Même page, en haut, **Actions permissions** : **Allow all actions and reusable workflows** (ou au minimum autoriser `FloRobart/*` et les actions utilisées par la CI).
+Même page, en haut, dans la rubrique **Actions permissions** :
 
-✅ **Vérification** : les trois réglages sont enregistrés.
+- ✅ Cocher **Allow FloRobart, and select non-FloRobart, actions and reusable workflows**.
+- ✅ Cocher **Allow Actions Created by GitHub**.
+- Dans **Allow or block specified actions and reusable workflows**, entrer les noms des actions utilisées par la CI (elles sont listées dans le `ci.yml`).
+
+   ```txt
+   docker/build-push-action@*,
+   docker/login-action@*,
+   docker/setup-buildx-action@*,
+   google-github-actions/auth@*,
+   r0adkll/upload-google-play@*,
+   subosito/flutter-action@*,
+   ```
+
+- Cliquer sur **Save**.
 
 ---
 
