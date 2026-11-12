@@ -218,7 +218,7 @@ Pourquoi : le git flow compare les historiques de `main` et `dev`. Un squash ou 
 2. Descendre jusqu'à **Workflow permissions**.
 3. Laisser **Read repository contents and packages permissions** (le `ci.yml` demande lui-même les droits dont il a besoin).
 4. ✅ Cocher **Allow GitHub Actions to create and approve pull requests**.
-5. **Save**.
+5. Cliquer sur **Save**.
 
 Pourquoi : la CI ouvre elle-même la pull request `release/vX.Y.Z` → `main` et la pull request de back-merge `main` → `dev`.
 
