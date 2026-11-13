@@ -284,6 +284,10 @@ test_commit_messages() {
     commit 'fix!: drop the old routes'
     assert_succeeds 'messages conventionnels acceptés' check-commit-messages.sh dev HEAD
 
+    commit 'Feat(api): add the import'
+    commit 'FIX!: drop the older routes'
+    assert_succeeds 'type en majuscules accepté' check-commit-messages.sh dev HEAD
+
     commit 'Update README.md'
     assert_fails 'message libre refusé' check-commit-messages.sh dev HEAD
 
@@ -318,6 +322,18 @@ test_next_version() {
     git tag v2.0.0
     commit 'perf(api)!: paginate everything'
     assert_equals 'type! : majeure' '3.0.0' "$(compute-next-version.sh)"
+
+    git tag v3.0.0
+    commit 'Feat(ui): light mode'
+    assert_equals 'Feat en majuscules : mineure' '3.1.0' "$(compute-next-version.sh)"
+
+    git tag v3.1.0
+    commit 'FIX!: drop the old settings'
+    assert_equals 'FIX! en majuscules : majeure' '4.0.0' "$(compute-next-version.sh)"
+
+    git tag v4.0.0
+    git commit --quiet --allow-empty --message 'refactor: rename a file' --message 'breaking change: nothing really breaks'
+    assert_equals 'breaking change en minuscules : corrective' '4.0.1' "$(compute-next-version.sh)"
 }
 
 test_plan_release() {

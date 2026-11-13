@@ -7,6 +7,9 @@
 #   new feature ("feat: ...", "feat(api): ...")                              →  minor
 #   anything else ("fix: ...", "chore: ...", "docs: ...")                    →  patch
 #
+# The type is case-insensitive ("Feat: ..." is a new feature), but the footer must
+# be written in upper case ("BREAKING CHANGE: ..."), as the convention requires.
+#
 # A project without any version tag starts at 1.0.0: its history may predate the
 # gitflow, so its messages are not read.
 #
@@ -32,17 +35,19 @@ find_bump_level() {
     subjects=$(git log --no-merges --format='%s' "${commit_range}")
     bodies=$(git log --no-merges --format='%b' "${commit_range}")
 
-    if grep -Eq "${BREAKING_CHANGE_SUBJECT_PATTERN}" <<< "${subjects}"; then
+    # Subjects are matched case-insensitively (--ignore-case): the type may be "Feat" or "FEAT".
+    if grep --extended-regexp --quiet --ignore-case "${BREAKING_CHANGE_SUBJECT_PATTERN}" <<< "${subjects}"; then
         echo 'major'
         return
     fi
 
-    if grep -Eq "${BREAKING_CHANGE_FOOTER_PATTERN}" <<< "${bodies}"; then
+    # The footer stays case-sensitive: only "BREAKING CHANGE:" or "BREAKING-CHANGE:" count.
+    if grep --extended-regexp --quiet "${BREAKING_CHANGE_FOOTER_PATTERN}" <<< "${bodies}"; then
         echo 'major'
         return
     fi
 
-    if grep -Eq "${FEATURE_SUBJECT_PATTERN}" <<< "${subjects}"; then
+    if grep --extended-regexp --quiet --ignore-case "${FEATURE_SUBJECT_PATTERN}" <<< "${subjects}"; then
         echo 'minor'
         return
     fi
