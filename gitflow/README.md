@@ -71,6 +71,7 @@ La version vient des messages de commit ajoutés depuis le dernier tag `vX.Y.Z`.
 | Tout le reste : `fix`, `perf`, `refactor`, `docs`, `chore`… | Corrective | `1.4.2` → `1.4.3` |
 
 - Types acceptés : `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`. Un commit qui n'en utilise aucun bloque la pull request.
+- La casse du type est libre : `Feat: …` et `FEAT: …` valent `feat: …`. Seul le pied `BREAKING CHANGE: …` doit être écrit en majuscules, sinon il est ignoré.
 - Les merge commits sont ignorés.
 - Les tags de release candidate (`v1.5.0-rc.2`) sont ignorés.
 - Un projet sans aucun tag `vX.Y.Z` commence à `1.0.0`.

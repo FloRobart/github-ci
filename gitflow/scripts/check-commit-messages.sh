@@ -5,6 +5,8 @@
 #   <type>(<optional scope>)<optional !>: <description>
 #   for example "feat(api): add the CSV export" or "fix!: drop the v1 routes"
 #
+# The type is case-insensitive: "Feat: ..." and "FIX: ..." are accepted too.
+#
 # The version is computed from these messages (see compute-next-version.sh), so a
 # message that does not follow the convention would be silently counted as a patch.
 # Merge commits are skipped: git and GitHub write them, not a person.
@@ -44,7 +46,9 @@ list_invalid_commits() {
     local subject
 
     git log --no-merges --format='%h %s' "${commit_range}" | while read -r commit_hash subject; do
-        if [[ ! "${subject}" =~ ${CONVENTIONAL_SUBJECT_PATTERN} ]]; then
+        # The type is case-insensitive ("Feat: ..." is accepted), as the convention says:
+        # the subject is lower-cased for the comparison only, and printed as written.
+        if [[ ! "${subject,,}" =~ ${CONVENTIONAL_SUBJECT_PATTERN} ]]; then
             echo "${commit_hash} ${subject}"
         fi
     done
