@@ -46,3 +46,39 @@ find_last_version_tag() {
 read_pubspec_version() {
     sed --quiet --regexp-extended "/^version:/ { s/^version:[[:space:]]*['\"]?([^'\"[:space:]#]*).*/\1/p; q }"
 }
+
+# Prints the Android versionCode of an "X.Y.Z" version: X * 1000000 + Y * 1000 + Z, for
+# example 1005002 for "1.5.2". Every new version gets a higher code, as Android and Google
+# Play require. The code only depends on the version, so F-Droid, which rebuilds a version
+# from its tag, finds the very same one in the committed pubspec.yaml.
+compute_android_version_code() {
+    local version="$1"
+
+    if [[ ! "${version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+        fail 'Version invalide' "« ${version} » n'est pas une version X.Y.Z : son versionCode Android ne peut pas être calculé."
+    fi
+
+    # "10#" reads the numbers in base 10, even with a leading zero.
+    local major=$((10#${BASH_REMATCH[1]}))
+    local minor=$((10#${BASH_REMATCH[2]}))
+    local patch=$((10#${BASH_REMATCH[3]}))
+
+    # Android refuses a versionCode above 2100000000.
+    if [ "${major}" -ge 2100 ] || [ "${minor}" -ge 1000 ] || [ "${patch}" -ge 1000 ]; then
+        fail 'Version trop grande' "${version} : le versionCode Android (X × 1000000 + Y × 1000 + Z) demande X inférieur à 2100, Y et Z inférieurs à 1000."
+    fi
+
+    echo $((major * 1000000 + minor * 1000 + patch))
+}
+
+# Prints the "version:" value that pubspec.yaml carries for a version: the version followed
+# by its Android versionCode as build number, for example "1.5.2+1005002".
+format_pubspec_version() {
+    local version="$1"
+    local version_code
+
+    # Explicit exit: a failure inside a command substitution does not stop the script by itself.
+    version_code=$(compute_android_version_code "${version}") || exit 1
+
+    echo "${version}+${version_code}"
+}

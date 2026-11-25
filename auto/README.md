@@ -19,7 +19,7 @@ Le workflow est [.github/workflows/auto.yml](../.github/workflows/auto.yml). Il 
 
 | Le projet a… | CI lancée | Ce qui est publié |
 |---|---|---|
-| `pubspec.yaml` + `Dockerfile`, ou un nom en `-app` | [Flutter](../flutter/README.md), application | Image Docker de la version web (s'il y a un `Dockerfile`) et Android : APK signé avec la clé de debug sans les secrets de signature, APK et AAB signés puis Google Play avec |
+| `pubspec.yaml` + `Dockerfile`, ou un nom en `-app` | [Flutter](../flutter/README.md), application | Image Docker de la version web (s'il y a un `Dockerfile`) et Android : APK signé avec la clé de debug sans les secrets de signature, APK et AAB signés puis Google Play avec. L'APK signé est publiable tel quel par F-Droid |
 | `pubspec.yaml` seul, ou un nom en `-lib` | [Flutter](../flutter/README.md), librairie | Tag et GitHub Release, puis pub.dev |
 | `package.json` + `Dockerfile` | [Node.js](../nodejs/README.md), application | Image Docker |
 | `package.json` + `Dockerfile` + la dépendance `astro` | [Astro](../astro/README.md) | Image Docker |

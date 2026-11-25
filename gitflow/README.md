@@ -55,8 +55,8 @@ Le `package.json`, le `package-lock.json` et le `pubspec.yaml` suivent les versi
 - **Quand** : à chaque bouton, sur la branche qui sera mergée dans `main`. Sur `dev`, c'est la branche `release/vX.Y.Z` créée par le bouton. Sur `release/*` ou `hotfix/*`, c'est cette branche, seulement si ses fichiers ne portent pas encore la version.
 - **Comment** : un commit `chore(release): vX.Y.Z` de `github-actions[bot]`, posé sur le commit construit. Le type `chore` ne change jamais la version calculée. La release candidate est taguée sur ce commit.
 - **Quelle version** : la version finale `X.Y.Z`, jamais `-rc.N`. Une release candidate porte son suffixe dans la copie construite seulement (paquet npm, extension).
-- **Quels fichiers** : ceux qui existent. `package.json` et `package-lock.json` passent par `npm version`, qui garde l'indentation. Dans `pubspec.yaml`, le build number `+N` est conservé (`1.4.0+12` → `1.5.0+12`) : la CI passe le sien au build Android.
-- **Garde-fou** : une pull request `release/vX.Y.Z` ou `hotfix/*` vers `main` est bloquée tant que ces fichiers ne portent pas la version que son merge publiera.
+- **Quels fichiers** : ceux qui existent. `package.json` et `package-lock.json` passent par `npm version`, qui garde l'indentation. Dans `pubspec.yaml`, la version est suivie de son `versionCode` Android en build number : `version: 1.5.0+1005000`, soit `X × 1 000 000 + Y × 1 000 + Z` (voir [flutter/README.md → Fichiers publiés](../flutter/README.md#fichiers-publiés)). Le tag porte ainsi tout ce qu'il faut pour reconstruire l'APK publié, comme le fait F-Droid. pub.dev ne reçoit pas ce build number.
+- **Garde-fou** : une pull request `release/vX.Y.Z` ou `hotfix/*` vers `main` est bloquée tant que ces fichiers ne portent pas la version que son merge publiera, build number du `pubspec.yaml` compris.
 
 Un hotfix doit donc passer par le bouton au moins une fois avant son merge, ou recevoir la version à la main. Le commit de version arrive sur la branche distante : faire `git pull` avant de pousser la suite.
 
@@ -215,6 +215,8 @@ Ordre d'appel par une CI de type : `gitflow-checks` en parallèle de la qualité
 | [to-image-name.sh](scripts/to-image-name.sh) | Nom de l'image depuis le nom du dépôt |
 | [detect-project.sh](scripts/detect-project.sh) | CI de type à lancer et ce qu'elle publie, depuis le `pubspec.yaml`, le `package.json`, le `Dockerfile` et le suffixe du nom |
 | [resolve-flutter-version.sh](scripts/resolve-flutter-version.sh) | Version de Flutter à installer, depuis l'option `flutter-version` et le `pubspec.yaml` |
+| [compute-android-version-code.sh](scripts/compute-android-version-code.sh) | `versionCode` Android d'une version : `1.5.2` donne `1005002` |
+| [read-android-application-id.sh](scripts/read-android-application-id.sh) | `applicationId` de l'application Android, qui nomme le dossier de build de F-Droid |
 | [write-version-files.sh](scripts/write-version-files.sh) | Écrit une version dans `package.json`, `package-lock.json` et `pubspec.yaml` |
 | [commit-version-files.sh](scripts/commit-version-files.sh) | Pousse la version écrite sur une branche de release ou de hotfix, en créant la branche si besoin |
 | [check-version-files.sh](scripts/check-version-files.sh) | Les fichiers de version portent la version attendue |

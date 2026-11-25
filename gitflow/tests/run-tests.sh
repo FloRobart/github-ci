@@ -207,6 +207,54 @@ test_flutter_version_resolution() {
     assert_equals 'pas de pubspec.yaml : dernière stable' 'version=' "$(resolve-flutter-version.sh '' 2> /dev/null)"
 }
 
+test_android_version_code() {
+    echo 'compute-android-version-code.sh'
+
+    assert_equals 'X.Y.Z : X × 1000000 + Y × 1000 + Z' '1005002' "$(compute-android-version-code.sh '1.5.2')"
+    assert_equals 'version 0.Y.Z' '1000' "$(compute-android-version-code.sh '0.1.0')"
+    assert_equals 'nombres à deux chiffres' '4012003' "$(compute-android-version-code.sh '4.12.3')"
+    assert_equals 'plus grande version possible' '2099999999' "$(compute-android-version-code.sh '2099.999.999')"
+    assert_fails 'Y à 1000 refusé' compute-android-version-code.sh '1.1000.0'
+    assert_fails 'X à 2100 refusé' compute-android-version-code.sh '2100.0.0'
+    assert_fails 'release candidate refusée' compute-android-version-code.sh '1.5.0-rc.1'
+    assert_fails 'version incomplète refusée' compute-android-version-code.sh '1.5'
+}
+
+# Writes android/app/build.gradle.kts with the given lines inside its defaultConfig block.
+write_gradle_default_config() {
+    local default_config_lines="$1"
+
+    mkdir -p android/app
+    printf 'android {\n    namespace = "fr.example.app"\n\n    defaultConfig {\n        // TODO: Specify your own unique Application ID.\n%b    }\n}\n' "${default_config_lines}" > android/app/build.gradle.kts
+}
+
+test_android_application_id() {
+    echo 'read-android-application-id.sh'
+
+    local warning_title='::warning title=applicationId introuvable::'
+    move_into_new_project
+
+    write_gradle_default_config '        applicationId = "fr.example.app"\n        applicationIdSuffix = ".debug"\n'
+    assert_equals 'Kotlin : applicationId lu' 'fr.example.app' "$(read-android-application-id.sh)"
+    assert_equals 'Kotlin : aucun avertissement' '' "$(read-android-application-id.sh 2>&1 > /dev/null)"
+
+    rm android/app/build.gradle.kts
+    printf 'android {\n    defaultConfig {\n        applicationId "fr.example.groovy"\n    }\n}\n' > android/app/build.gradle
+    assert_equals 'Groovy : applicationId lu' 'fr.example.groovy' "$(read-android-application-id.sh)"
+
+    rm android/app/build.gradle
+    write_gradle_default_config '        applicationId = "fr.example.free"\n        applicationId = "fr.example.paid"\n'
+    assert_equals 'deux applicationId : rien' '' "$(read-android-application-id.sh 2> /dev/null)"
+    assert_contains 'deux applicationId : avertissement' "${warning_title}" "$(read-android-application-id.sh 2>&1 > /dev/null)"
+
+    write_gradle_default_config '        applicationId = rootProject.extra["applicationId"] as String\n'
+    assert_equals 'applicationId dans une variable : rien' '' "$(read-android-application-id.sh 2> /dev/null)"
+
+    rm -r android
+    assert_equals 'pas de projet Android : rien' '' "$(read-android-application-id.sh 2> /dev/null)"
+    assert_contains 'pas de projet Android : avertissement' "${warning_title}" "$(read-android-application-id.sh 2>&1 > /dev/null)"
+}
+
 test_node_project_detection() {
     echo 'detect-project.sh : Node.js'
 
@@ -408,7 +456,7 @@ write_project_files() {
 
     printf '{\n    "name": "demo",\n    "version": "%s"\n}\n' "${version}" > package.json
     printf '{\n  "name": "demo",\n  "version": "%s",\n  "lockfileVersion": 3,\n  "packages": {\n    "": { "name": "demo", "version": "%s" }\n  }\n}\n' "${version}" "${version}" > package-lock.json
-    printf 'name: demo\nversion: %s+7 # build number kept\n\nenvironment:\n  sdk: ^3.0.0\n' "${version}" > pubspec.yaml
+    printf 'name: demo\nversion: %s+%s # build number\n\nenvironment:\n  sdk: ^3.0.0\n' "${version}" "$(compute-android-version-code.sh "${version}")" > pubspec.yaml
 }
 
 test_write_version_files() {
@@ -421,11 +469,17 @@ test_write_version_files() {
     assert_equals 'indentation de package.json conservée' '    "version": "1.5.0"' "$(grep '"version"' package.json)"
     assert_equals 'package-lock.json' '1.5.0' "$(jq --raw-output '.version' package-lock.json)"
     assert_equals 'package-lock.json, packages[""]' '1.5.0' "$(jq --raw-output '.packages[""].version' package-lock.json)"
-    assert_equals 'pubspec.yaml, build number conservé' 'version: 1.5.0+7' "$(grep '^version:' pubspec.yaml)"
+    assert_equals 'pubspec.yaml, versionCode en build number' 'version: 1.5.0+1005000' "$(grep '^version:' pubspec.yaml)"
+
+    printf 'name: demo\nversion: 1.4.0+12\n' > pubspec.yaml
+    write-version-files.sh '1.5.0'
+    assert_equals 'pubspec.yaml, ancien build number remplacé' 'version: 1.5.0+1005000' "$(grep '^version:' pubspec.yaml)"
 
     printf 'name: demo\n' > pubspec.yaml
     write-version-files.sh '1.5.0'
-    assert_equals 'pubspec.yaml sans version : ligne ajoutée' 'version: 1.5.0' "$(grep '^version:' pubspec.yaml)"
+    assert_equals 'pubspec.yaml sans version : ligne ajoutée' 'version: 1.5.0+1005000' "$(grep '^version:' pubspec.yaml)"
+
+    assert_fails 'version sans versionCode possible refusée' write-version-files.sh '1.1000.0'
 
     move_into_new_project Dockerfile
     assert_succeeds 'aucun fichier de version : rien à faire' write-version-files.sh '1.5.0'
@@ -440,6 +494,12 @@ test_check_version_files() {
     commit 'chore: add the version files'
     assert_succeeds 'fichiers à jour acceptés' check-version-files.sh '1.5.0'
     assert_fails 'fichiers en retard refusés' check-version-files.sh '1.6.0'
+    assert_contains 'ligne attendue du pubspec.yaml dans le message' '« version: 1.6.0+1006000 »' "$(check-version-files.sh '1.6.0' 2>&1)"
+
+    sed --in-place 's/^version:.*/version: 1.5.0+7/' pubspec.yaml
+    git commit --quiet --all --message 'chore: build number left behind'
+    assert_fails 'build number autre que le versionCode refusé' check-version-files.sh '1.5.0'
+    git revert --no-edit HEAD > /dev/null
 
     jq '.packages[""].version = "1.4.0"' package-lock.json > package-lock.tmp && mv package-lock.tmp package-lock.json
     git commit --quiet --all --message 'chore: lockfile left behind'
@@ -494,6 +554,8 @@ test_commit_version_files() {
 test_image_name
 test_flutter_project_detection
 test_flutter_version_resolution
+test_android_version_code
+test_android_application_id
 test_node_project_detection
 test_database_project_detection
 test_unknown_project_detection

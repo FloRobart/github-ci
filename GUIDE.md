@@ -124,6 +124,7 @@ La CI échoue si un prérequis manque. Fais-le sur ta branche de travail en loca
    ```
 
 4. Pour une version web en image Docker : un `Dockerfile` qui construit lui-même le web (modèle : [flutter/example/Dockerfile](flutter/example/Dockerfile)).
+5. Pour Android : la version de Flutter fixée dans le `pubspec.yaml` (`environment: flutter: X.Y.Z`) et le `pubspec.lock` commité, pour que la release soit reproductible (voir [flutter/README.md → Environnement de build](flutter/README.md#environnement-de-build)).
 
 ### Si c'est un projet de migrations (`…-database`)
 
@@ -329,18 +330,18 @@ Méthode alternative : un *granular access token* npm en écriture dans le secre
 
 ### 6.3 Application Flutter : signature Android
 
-Sans ces secrets, un APK signé avec la clé de debug est publié (installable, mais refusé par les stores).
+Sans ces secrets, un APK signé avec la clé de debug est publié (installable, mais refusé par les stores et par F-Droid).
 
-1. Créer la clé (une fois, à garder précieusement, hors du dépôt) :
+1. Créer la clé de signature de l'application (une fois, à sauvegarder précieusement avec ses mots de passe, hors du dépôt : sans elle, plus aucune mise à jour possible) :
 
    ```bash
-   keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+   keytool -genkeypair -v -keystore release-keystore.jks -storetype PKCS12 -keyalg RSA -keysize 4096 -validity 10000 -alias release
    ```
 
 2. Encoder le fichier :
 
    ```bash
-   base64 --wrap=0 upload-keystore.jks
+   base64 --wrap=0 release-keystore.jks
    ```
 
 3. Ajouter **les quatre** secrets (la CI échoue s'il en manque un) :
@@ -349,20 +350,23 @@ Sans ces secrets, un APK signé avec la clé de debug est publié (installable, 
    |---|---|
    | `ANDROID_KEYSTORE_BASE64` | La sortie de la commande `base64` |
    | `ANDROID_KEYSTORE_PASSWORD` | Mot de passe du keystore |
-   | `ANDROID_KEY_ALIAS` | `upload` |
-   | `ANDROID_KEY_PASSWORD` | Mot de passe de la clé |
+   | `ANDROID_KEY_ALIAS` | `release` |
+   | `ANDROID_KEY_PASSWORD` | Mot de passe de la clé (le même que celui du keystore) |
 
-4. Dans le projet, faire lire `android/key.properties` par `android/app/build.gradle(.kts)` ([doc Flutter](https://docs.flutter.dev/deployment/android#configure-signing-in-gradle)).
-5. Ajouter `key.properties` et `*.jks` au `.gitignore`.
+4. Dans le projet, faire lire `android/key.properties` par `android/app/build.gradle.kts`, avec la clé de debug à défaut : voir [flutter/README.md → Signature](flutter/README.md#signature).
+5. Vérifier que `android/.gitignore` ignore `key.properties`, `*.jks` et `*.keystore` (c'est le cas du fichier créé par Flutter).
+
+**F-Droid** : ajouter le secret `F_DROID_ENABLE` = `true`. La CI exige alors la clé de signature et vérifie que F-Droid reconstruira le même APK ; F-Droid publie ensuite lui-même l'APK signé de chaque GitHub Release finale. Il faut aussi inscrire l'application une fois : voir [flutter/README.md → F-Droid](flutter/README.md#f-droid).
 
 ### 6.4 Application Flutter : Google Play
 
 Nécessite la signature (6.3).
 
-1. Créer l'application dans la Play Console et y envoyer **la première version à la main** (l'AAB attaché à une release candidate GitHub).
-2. Dans Google Cloud : activer l'API **Google Play Android Developer**, créer un **compte de service**, puis une **clé JSON**.
-3. Play Console → **Utilisateurs et autorisations** → **Inviter un utilisateur** → l'adresse du compte de service, avec les droits de publication.
-4. Secret `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` = tout le contenu du fichier JSON.
+1. Créer l'application dans la Play Console en important **ta propre clé de signature** (celle de 6.3) dans *Play App Signing*, pour garder la même signature que sur GitHub et F-Droid : voir [flutter/README.md → Google Play](flutter/README.md#google-play).
+2. Y envoyer **la première version à la main** : l'AAB attaché à la GitHub Release d'une version finale, avant de créer le secret ci-dessous.
+3. Dans Google Cloud : activer l'API **Google Play Android Developer**, créer un **compte de service**, puis une **clé JSON**.
+4. Play Console → **Utilisateurs et autorisations** → **Inviter un utilisateur** → l'adresse du compte de service, avec les droits de publication.
+5. Secret `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` = tout le contenu du fichier JSON.
 
 Compte développeur récent : mettre `google-play-track: alpha` dans le `ci.yml` le temps d'avoir accès à la production (voir [auto/README.md → Options](auto/README.md#options)).
 
