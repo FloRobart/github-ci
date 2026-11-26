@@ -9,7 +9,7 @@ Un projet l'importe avec **un seul fichier** de quelques lignes, **le même pour
 ```mermaid
 flowchart LR
     project["Projet<br/>.github/workflows/ci.yml"] --> auto["Détection<br/>auto.yml"]
-    auto --> type["CI du type<br/>nodejs.yml · astro.yml · flutter.yml · extension.yml · database.yml"]
+    auto --> type["CI du type<br/>nodejs.yml · astro.yml · flutter.yml · extension.yml · database.yml · debian.yml"]
     type --> gitflow["CI globale<br/>gitflow-*.yml"]
 ```
 
@@ -17,7 +17,7 @@ flowchart LR
 |---|---|---|
 | **Projet** | Le même `ci.yml` partout, qui appelle `auto.yml` | [auto/example/ci.yml](auto/example/ci.yml) |
 | **Auto** | Détecte le type du projet et lance la CI de ce type | [auto/](auto/) |
-| **Type** | Ce qui dépend de la techno : installation, lint, types, tests, build Android, Google Play, paquet npm ou pub.dev, stores d'extensions, migrations de base de données… | [nodejs/](nodejs/), [astro/](astro/), [flutter/](flutter/), [extension/](extension/), [database/](database/) |
+| **Type** | Ce qui dépend de la techno : installation, lint, types, tests, build Android, Google Play, paquet npm ou pub.dev, stores d'extensions, migrations de base de données, paquet Debian… | [nodejs/](nodejs/), [astro/](astro/), [flutter/](flutter/), [extension/](extension/), [database/](database/), [debian/](debian/) |
 | **Gitflow** | Ce qui est commun à tous : règles de branches, messages de commit, version, détection du type, image Docker, GitHub Release, back-merge | [gitflow/](gitflow/) |
 
 Chaque niveau reste utilisable seul : un projet peut appeler directement une CI de type, et une CI de type appelle les briques gitflow. Chaque type branche les mêmes briques gitflow dans le même ordre. Ajouter un type, c'est écrire son job `quality`, recopier ce câblage, puis ajouter sa règle à la détection et son job à `auto.yml`.
@@ -28,8 +28,9 @@ Les fichiers à la racine et le suffixe du nom du dépôt disent ce qu'est le pr
 
 | Le projet a… | Type | Publié |
 |---|---|---|
-| `pubspec.yaml` + `Dockerfile`, ou un nom en `-app` | Application Flutter | Image Docker (avec un `Dockerfile`), APK de debug, ou APK et AAB signés puis Google Play s'il y a les secrets |
+| `pubspec.yaml` + `Dockerfile` ou `DEBIAN/control`, ou un nom en `-app` | Application Flutter | Image Docker (avec un `Dockerfile`), APK de debug, ou APK et AAB signés puis Google Play s'il y a les secrets, paquet Debian `.deb` (avec un `DEBIAN/control`) |
 | `pubspec.yaml` seul, ou un nom en `-lib` | Librairie Flutter | GitHub Release, puis pub.dev |
+| `DEBIAN/control`, sans `pubspec.yaml` | Paquet Debian | Fichier `.deb` |
 | `package.json` + `Dockerfile` | Application Node.js, ou site Astro avec la dépendance `astro` | Image Docker |
 | `package.json` + un nom en `-extension` | Extension navigateur | Archive `.zip`, puis Chrome Web Store et addons.mozilla.org |
 | `package.json` + un nom en `-lib` | Librairie Node.js | Paquet npm |
@@ -62,7 +63,7 @@ Les détails (règles, calcul de version, réglages du dépôt) sont dans [gitfl
 ## Installer dans un projet
 
 1. Copier [auto/example/ci.yml](auto/example/ci.yml) dans le projet, sous `.github/workflows/ci.yml` : voir [auto/README.md](auto/README.md).
-2. Suivre les prérequis du README du type : [Node.js](nodejs/README.md), [Astro](astro/README.md), [Flutter](flutter/README.md), [Extension](extension/README.md) ou [Database](database/README.md).
+2. Suivre les prérequis du README du type : [Node.js](nodejs/README.md), [Astro](astro/README.md), [Flutter](flutter/README.md), [Extension](extension/README.md), [Database](database/README.md) ou [Debian](debian/README.md).
 3. Faire les réglages du dépôt, une fois par projet : [gitflow/README.md → Installer dans un projet](gitflow/README.md#installer-dans-un-projet).
 
 ## Organisation de ce dépôt
@@ -79,12 +80,13 @@ Les détails (règles, calcul de version, réglages du dépôt) sont dans [gitfl
 ├── flutter.yml                  → appartient à flutter/
 ├── extension.yml                → appartient à extension/
 ├── database.yml                 → appartient à database/
+├── debian.yml                   → appartient à debian/
 └── self-tests.yml               → CI de ce dépôt, jamais appelée par les projets
 gitflow/
-├── scripts/                La logique du git flow et la détection du type, en bash, testables en local
+├── scripts/                La logique du git flow, la détection du type et la construction des paquets Debian, en bash, testables en local
 ├── tests/                  Tests des scripts
 └── rulesets/               Protections de branches à importer dans chaque projet
-auto/ · nodejs/ · astro/ · flutter/ · extension/ · database/
+auto/ · nodejs/ · astro/ · flutter/ · extension/ · database/ · debian/
 └── example/                Fichiers à copier dans un projet
 archive/                    Anciennes versions, conservées pour mémoire
 ```
@@ -103,7 +105,7 @@ archive/                    Anciennes versions, conservées pour mémoire
 gitflow/tests/run-tests.sh
 ```
 
-Les tests créent des dépôts git et des projets jetables, et vérifient la détection du type de projet, le calcul de version, les règles de branches, les messages de commit, le plan de release et l'écriture de la version dans les fichiers du projet. Ils n'ont besoin ni de réseau ni de GitHub, seulement de `jq` et `npm`.
+Les tests créent des dépôts git et des projets jetables, et vérifient la détection du type de projet, le calcul de version, les règles de branches, les messages de commit, le plan de release, l'écriture de la version dans les fichiers du projet et la construction d'un paquet Debian. Ils n'ont besoin ni de réseau ni de GitHub, seulement de `jq`, `npm` et `dpkg-deb`.
 
 Lint, avec [shellcheck](https://github.com/koalaman/shellcheck) et [actionlint](https://github.com/rhysd/actionlint) installés :
 
@@ -117,7 +119,7 @@ actionlint .github/workflows/*.yml ./*/example/ci.yml
 
 [self-tests.yml](.github/workflows/self-tests.yml) lance ces trois contrôles sur chaque pull request de ce dépôt et sur `main`. Il n'a pas de `workflow_call` : les projets qui importent Github-ci ne le lancent jamais. Il teste le code de la pull request elle-même, jamais la version `@main`.
 
-Ne sont pas couverts : l'enchaînement réel des workflows réutilisables appelés par un projet, les scripts qui passent par l'API GitHub (`open-pull-request.sh`, `create-github-release.sh`) et les envois aux stores (Google Play, pub.dev, Chrome Web Store, addons.mozilla.org). Seul un vrai projet de test les vérifie.
+Ne sont pas couverts : l'enchaînement réel des workflows réutilisables appelés par un projet, les scripts qui passent par l'API GitHub (`open-pull-request.sh`, `create-github-release.sh`), ceux qui passent par Docker ou lintian (`run-in-docker-image.sh`, `install-and-remove-debian-package.sh`, `build-flutter-linux-bundle.sh`, `check-debian-package.sh`) et les envois aux stores (Google Play, pub.dev, Chrome Web Store, addons.mozilla.org). Seul un vrai projet de test les vérifie.
 
 ## Séparer en plusieurs dépôts plus tard
 

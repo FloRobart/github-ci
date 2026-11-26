@@ -2,7 +2,7 @@
 
 La partie commune à tous les types de projets : règles du git flow, calcul de version, image Docker, GitHub Release et back-merge.
 
-Un projet n'utilise jamais ce dossier directement. Il passe par [auto](../auto/README.md), qui choisit la CI de son type ([nodejs](../nodejs/README.md), [astro](../astro/README.md), [flutter](../flutter/README.md), [extension](../extension/README.md)), ou directement par l'une d'elles. Ce sont elles qui appellent ces briques.
+Un projet n'utilise jamais ce dossier directement. Il passe par [auto](../auto/README.md), qui choisit la CI de son type ([nodejs](../nodejs/README.md), [astro](../astro/README.md), [flutter](../flutter/README.md), [extension](../extension/README.md), [database](../database/README.md), [debian](../debian/README.md)), ou directement par l'une d'elles. Ce sont elles qui appellent ces briques.
 
 ## Les branches
 
@@ -50,12 +50,12 @@ Une release candidate n'est publiée que par ce bouton. Sur `dev`, il faut aussi
 
 ## Les fichiers de version
 
-Le `package.json`, le `package-lock.json` et le `pubspec.yaml` suivent les versions publiées : la CI y écrit la version, et `main` la porte dès que la release ou le hotfix y est mergé. Le back-merge la ramène ensuite dans `dev`.
+Le `package.json`, le `package-lock.json`, le `pubspec.yaml` et le `DEBIAN/control` suivent les versions publiées : la CI y écrit la version, et `main` la porte dès que la release ou le hotfix y est mergé. Le back-merge la ramène ensuite dans `dev`.
 
 - **Quand** : à chaque bouton, sur la branche qui sera mergée dans `main`. Sur `dev`, c'est la branche `release/vX.Y.Z` créée par le bouton. Sur `release/*` ou `hotfix/*`, c'est cette branche, seulement si ses fichiers ne portent pas encore la version.
 - **Comment** : un commit `chore(release): vX.Y.Z` de `github-actions[bot]`, posé sur le commit construit. Le type `chore` ne change jamais la version calculée. La release candidate est taguée sur ce commit.
-- **Quelle version** : la version finale `X.Y.Z`, jamais `-rc.N`. Une release candidate porte son suffixe dans la copie construite seulement (paquet npm, extension).
-- **Quels fichiers** : ceux qui existent. `package.json` et `package-lock.json` passent par `npm version`, qui garde l'indentation. Dans `pubspec.yaml`, la version est suivie de son `versionCode` Android en build number : `version: 1.5.0+1005000`, soit `X × 1 000 000 + Y × 1 000 + Z` (voir [flutter/README.md → Fichiers publiés](../flutter/README.md#fichiers-publiés)). Le tag porte ainsi tout ce qu'il faut pour reconstruire l'APK publié, comme le fait F-Droid. pub.dev ne reçoit pas ce build number.
+- **Quelle version** : la version finale `X.Y.Z`, jamais `-rc.N`. Une release candidate porte son suffixe dans la copie construite seulement (paquet npm, extension, paquet Debian en `X.Y.Z~rc.N`).
+- **Quels fichiers** : ceux qui existent. `package.json` et `package-lock.json` passent par `npm version`, qui garde l'indentation. Dans `pubspec.yaml`, la version est suivie de son `versionCode` Android en build number : `version: 1.5.0+1005000`, soit `X × 1 000 000 + Y × 1 000 + Z` (voir [flutter/README.md → Fichiers publiés](../flutter/README.md#fichiers-publiés)). Le tag porte ainsi tout ce qu'il faut pour reconstruire l'APK publié, comme le fait F-Droid. pub.dev ne reçoit pas ce build number. Dans `DEBIAN/control`, le champ `Version:` est remplacé, ou ajouté après `Package:` s'il manque.
 - **Garde-fou** : une pull request `release/vX.Y.Z` ou `hotfix/*` vers `main` est bloquée tant que ces fichiers ne portent pas la version que son merge publiera, build number du `pubspec.yaml` compris.
 
 Un hotfix doit donc passer par le bouton au moins une fois avant son merge, ou recevoir la version à la main. Le commit de version arrive sur la branche distante : faire `git pull` avant de pousser la suite.
@@ -79,25 +79,29 @@ La version vient des messages de commit ajoutés depuis le dernier tag `vX.Y.Z`.
 
 ## Type de projet
 
-[detect-project.sh](scripts/detect-project.sh) lit les fichiers à la racine du projet et le suffixe du nom du dépôt. Il en tire la CI de type à lancer (`flutter`, `nodejs`, `astro`, `extension` ou `database`) et ce qu'elle publie (application, librairie, extension ou migrations). Les règles se lisent de haut en bas, la première qui correspond gagne :
+[detect-project.sh](scripts/detect-project.sh) lit les fichiers à la racine du projet et le suffixe du nom du dépôt. Il en tire la CI de type à lancer (`flutter`, `nodejs`, `astro`, `extension`, `database` ou `debian`) et ce qu'elle publie (application, librairie, extension, migrations ou paquet Debian). Les règles se lisent de haut en bas, la première qui correspond gagne :
 
 | Fichiers | Nom du dépôt | Résultat |
 |---|---|---|
 | `Dockerfile` | `…-database` | Migrations de base de données, quels que soient les autres fichiers |
 | Pas de `Dockerfile` | `…-database` | Refusé : les migrations sont publiées en image Docker |
-| `pubspec.yaml` | `…-lib` | Librairie Flutter. Un `Dockerfile` fait échouer la CI. |
-| `pubspec.yaml` | `…-app` | Application Flutter, mobile seulement s'il n'y a pas de `Dockerfile` |
+| Un dossier `DEBIAN/` sans `DEBIAN/control` | — | Refusé : c'est le fichier `control` qui décrit le paquet |
+| `pubspec.yaml` | `…-lib` | Librairie Flutter. Un `Dockerfile` ou un `DEBIAN/control` fait échouer la CI. |
+| `pubspec.yaml` | `…-app` | Application Flutter, mobile seulement s'il n'y a ni `Dockerfile` ni `DEBIAN/control` |
 | `pubspec.yaml` | `…-extension` | Refusé : une extension navigateur se construit avec npm |
-| `pubspec.yaml` + `Dockerfile` | Autre | Application Flutter |
+| `pubspec.yaml` + `Dockerfile` ou `DEBIAN/control` | Autre | Application Flutter |
 | `pubspec.yaml` | Autre | Librairie Flutter, avec un avertissement : renommer en `-lib` pour le confirmer, ou en `-app` si c'est une application mobile |
+| `DEBIAN/control` | Tous | Paquet Debian. Le `package.json` et le `Dockerfile` sont ignorés. |
 | `package.json` | `…-extension` | Extension navigateur. Le `Dockerfile` est ignoré. |
 | `package.json` | `…-lib` | Librairie Node.js. Un `Dockerfile` fait échouer la CI. |
 | `package.json` + `Dockerfile` | Autre, `-app` compris | Site Astro si `astro` est dans les `dependencies` ou les `devDependencies`, application Node.js sinon |
 | `package.json` | `…-app` | Refusé : une application Node.js ou Astro est publiée en image Docker |
 | `package.json` | Autre | Refusé : impossible de savoir si c'est une application ou une librairie |
-| Ni l'un ni l'autre | — | Refusé |
+| Aucun de ces fichiers | — | Refusé. Un `debian/control` en minuscules (paquet source Debian) est refusé avec son propre message. |
 
 - `pubspec.yaml` passe avant `package.json` : un projet Flutter peut avoir un `package.json` pour ses outils (husky, commitlint…).
+- `pubspec.yaml` passe avant `DEBIAN/control` : une application Flutter avec un `DEBIAN/control` publie aussi son paquet Debian (voir [flutter/README.md → Debian](../flutter/README.md#debian)). Le résultat `has-debian-control` de la détection le dit à la CI Flutter.
+- `DEBIAN/control` passe avant `package.json` : un paquet Debian peut avoir un `package.json` pour ses outils.
 - Le suffixe passe avant le `Dockerfile`, et `-database` passe avant tout : un projet de base de données peut avoir un `package.json` pour ses outils.
 - Le suffixe est lu sur le nom normalisé (voir plus bas) : `FlorAccess_App` devient `floraccess-app`.
 - Un script npm nommé `astro` ne compte pas : seule la dépendance fait un site Astro. Une librairie de composants Astro (`…-lib`) reste une librairie npm.
@@ -194,7 +198,7 @@ Ils sont dans [.github/workflows](../.github/workflows) à la racine du dépôt,
 | Fichier | Rôle |
 |---|---|
 | [gitflow-checks.yml](../.github/workflows/gitflow-checks.yml) | Pull request : règles de branches, messages de commit, version d'une release, fichiers de version |
-| [gitflow-prepare-release.yml](../.github/workflows/gitflow-prepare-release.yml) | Bouton ou merge sur `main` : décide quoi publier (version, tag, branche à créer, application, librairie ou extension). N'écrit rien. |
+| [gitflow-prepare-release.yml](../.github/workflows/gitflow-prepare-release.yml) | Bouton ou merge sur `main` : décide quoi publier (version, tag, branche à créer, application, librairie, extension, migrations ou paquet Debian). N'écrit rien. |
 | [gitflow-docker-image.yml](../.github/workflows/gitflow-docker-image.yml) | Construit l'image d'une application une fois et la pousse sur GHCR et Docker Hub |
 | [gitflow-publish-release.yml](../.github/workflows/gitflow-publish-release.yml) | Version écrite dans les fichiers, branche de release et sa pull request, tag et GitHub Release, back-merge |
 
@@ -213,11 +217,19 @@ Ordre d'appel par une CI de type : `gitflow-checks` en parallèle de la qualité
 | [compute-next-version.sh](scripts/compute-next-version.sh) | Version suivante depuis les commits |
 | [plan-release.sh](scripts/plan-release.sh) | Ce que le run publie |
 | [to-image-name.sh](scripts/to-image-name.sh) | Nom de l'image depuis le nom du dépôt |
-| [detect-project.sh](scripts/detect-project.sh) | CI de type à lancer et ce qu'elle publie, depuis le `pubspec.yaml`, le `package.json`, le `Dockerfile` et le suffixe du nom |
+| [detect-project.sh](scripts/detect-project.sh) | CI de type à lancer et ce qu'elle publie, depuis le `pubspec.yaml`, le `DEBIAN/control`, le `package.json`, le `Dockerfile` et le suffixe du nom |
 | [resolve-flutter-version.sh](scripts/resolve-flutter-version.sh) | Version de Flutter à installer, depuis l'option `flutter-version` et le `pubspec.yaml` |
 | [compute-android-version-code.sh](scripts/compute-android-version-code.sh) | `versionCode` Android d'une version : `1.5.2` donne `1005002` |
 | [read-android-application-id.sh](scripts/read-android-application-id.sh) | `applicationId` de l'application Android, qui nomme le dossier de build de F-Droid |
-| [write-version-files.sh](scripts/write-version-files.sh) | Écrit une version dans `package.json`, `package-lock.json` et `pubspec.yaml` |
+| [choose-flutter-build-options.sh](scripts/choose-flutter-build-options.sh) | Options de build d'une release Flutter, partagées par Android et Linux |
+| [build-flutter-linux-bundle.sh](scripts/build-flutter-linux-bundle.sh) | Construit la version Linux d'une application Flutter, dans un conteneur de la distribution visée |
+| [stage-debian-package.sh](scripts/stage-debian-package.sh) | Copie l'arborescence d'un paquet Debian (`DEBIAN/`, `etc/`, `opt/`, `srv/`, `usr/`, `var/`), sans le reste du dépôt |
+| [add-flutter-bundle-to-debian-package.sh](scripts/add-flutter-bundle-to-debian-package.sh) | Ajoute l'application Flutter construite au paquet : `/opt/<paquet>/` et `/usr/bin/<paquet>` |
+| [build-debian-package.sh](scripts/build-debian-package.sh) | Complète l'arborescence (version, `Installed-Size`, `conffiles`, `md5sums`, droits) et construit le `.deb` |
+| [install-and-remove-debian-package.sh](scripts/install-and-remove-debian-package.sh) | Installe un `.deb`, vérifie les bibliothèques de ses exécutables, puis le désinstalle, dans un conteneur jetable |
+| [check-debian-package.sh](scripts/check-debian-package.sh) | Vérifie les fichiers `.desktop` d'un `.deb`, et écrit le rapport de lintian pour le résumé du run |
+| [run-in-docker-image.sh](scripts/run-in-docker-image.sh) | Lance un de ces scripts dans un conteneur jetable d'une image Docker |
+| [write-version-files.sh](scripts/write-version-files.sh) | Écrit une version dans `package.json`, `package-lock.json`, `pubspec.yaml` et `DEBIAN/control` |
 | [commit-version-files.sh](scripts/commit-version-files.sh) | Pousse la version écrite sur une branche de release ou de hotfix, en créant la branche si besoin |
 | [check-version-files.sh](scripts/check-version-files.sh) | Les fichiers de version portent la version attendue |
 | [open-pull-request.sh](scripts/open-pull-request.sh) | Ouvre une pull request si elle n'existe pas encore et si sa branche cible existe |
@@ -236,7 +248,8 @@ Tests : `gitflow/tests/run-tests.sh`.
 | « Rien à publier » | Aucun commit depuis la dernière version. |
 | « Fichiers de version en retard » | La branche vers `main` n'a pas la version dans ses fichiers : lancer le bouton dessus, ou les mettre à jour à la main. Arrive après un hotfix sans bouton, ou une branche de release créée à la main. |
 | « Branche modifiée pendant le run » | Un commit a été poussé sur la branche pendant le run, alors que la version devait y être écrite : relancer le bouton sur la branche. |
-| « Projet non reconnu » | Ni `pubspec.yaml` ni `package.json` à la racine du projet, et pas de suffixe `-database`. |
+| « Projet non reconnu » | Ni `pubspec.yaml`, ni `DEBIAN/control`, ni `package.json` à la racine du projet, et pas de suffixe `-database`. |
+| « DEBIAN/control manquant » ou « Paquet source Debian » | Un dossier `DEBIAN/` sans son fichier `control`, ou un `debian/control` en minuscules, que la CI ne sait pas construire : voir [debian/README.md](../debian/README.md#reconnaître-un-paquet-debian). |
 | « Librairie avec un Dockerfile » | Un dépôt `…-lib` a un `Dockerfile` : le supprimer, ou renommer le dépôt en `…-app`. |
 | « Extension Flutter » | Un dépôt `…-extension` a un `pubspec.yaml` : une extension se construit avec npm. |
 | « Type de projet ambigu » | Un `package.json` sans `Dockerfile` ni suffixe : ajouter un `Dockerfile` (application), ou renommer le dépôt en `…-lib` ou `…-extension`. |

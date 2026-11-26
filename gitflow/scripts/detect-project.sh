@@ -9,12 +9,19 @@
 #     a Dockerfile                   →  migrations image
 #     no Dockerfile                  →  refused: the migrations are published as a Docker image
 #
+#   DEBIAN/ folder without DEBIAN/control  →  refused: the control file describes the package
+#
 #   pubspec.yaml (Flutter, even next to a package.json used for tooling)
-#     name ending with "-lib"        →  library, which must not have a Dockerfile
-#     name ending with "-app"        →  application (mobile only when there is no Dockerfile)
+#     name ending with "-lib"        →  library, which must have neither Dockerfile nor
+#                                       DEBIAN/control
+#     name ending with "-app"        →  application (mobile only when there is neither
+#                                       Dockerfile nor DEBIAN/control)
 #     name ending with "-extension"  →  refused: a browser extension is built with npm
-#     a Dockerfile                   →  application
-#     no Dockerfile                  →  library (a warning asks for a suffix)
+#     a Dockerfile or DEBIAN/control →  application
+#     neither of them                →  library (a warning asks for a suffix)
+#
+#   DEBIAN/control                   →  Debian package, whatever the suffix, even next to a
+#                                       package.json used for tooling
 #
 #   package.json (Node.js)
 #     name ending with "-extension"  →  browser extension, the Dockerfile is ignored
@@ -24,13 +31,17 @@
 #     name ending with "-app"        →  refused: an application is published as a Docker image
 #     any other name                 →  refused: application or library cannot be told apart
 #
-#   Neither file                     →  refused
+#   None of these files              →  refused
 #
 # Printed keys:
 #
-#   type            "flutter", "nodejs", "astro", "extension" or "database": the type CI to run
-#   kind            "application", "library", "extension" or "migrations": what the type CI publishes
-#   has-dockerfile  "true" when a Dockerfile exists at the root, "false" otherwise
+#   type                "flutter", "nodejs", "astro", "extension", "database" or "debian":
+#                       the type CI to run
+#   kind                "application", "library", "extension", "migrations" or "package":
+#                       what the type CI publishes
+#   has-dockerfile      "true" when a Dockerfile exists at the root, "false" otherwise
+#   has-debian-control  "true" when DEBIAN/control exists, "false" otherwise: a Flutter
+#                       application then also publishes its Debian package
 #
 # Usage: detect-project.sh <project name, as printed by to-image-name.sh>
 
@@ -46,6 +57,9 @@ readonly LIBRARY_SUFFIX='-lib'
 readonly EXTENSION_SUFFIX='-extension'
 readonly DATABASE_SUFFIX='-database'
 
+# The control file of a Debian source package, built with dpkg-buildpackage: not supported.
+readonly DEBIAN_SOURCE_CONTROL_FILE='debian/control'
+
 main() {
     local project_name="$1"
 
@@ -54,13 +68,20 @@ main() {
         has_dockerfile='true'
     fi
 
-    detect_type_and_kind "${project_name}" "${has_dockerfile}"
+    local has_debian_control='false'
+    if [ -f "${DEBIAN_CONTROL_FILE}" ]; then
+        has_debian_control='true'
+    fi
+
+    detect_type_and_kind "${project_name}" "${has_dockerfile}" "${has_debian_control}"
     echo "has-dockerfile=${has_dockerfile}"
+    echo "has-debian-control=${has_debian_control}"
 }
 
 detect_type_and_kind() {
     local project_name="$1"
     local has_dockerfile="$2"
+    local has_debian_control="$3"
 
     # A database project may hold a package.json for its tooling: the suffix wins.
     if [[ "${project_name}" == *"${DATABASE_SUFFIX}" ]]; then
@@ -68,8 +89,16 @@ detect_type_and_kind() {
         return
     fi
 
+    refuse_debian_folder_without_control "${project_name}" "${has_debian_control}"
+
     if [ -f pubspec.yaml ]; then
-        detect_flutter_project "${project_name}" "${has_dockerfile}"
+        detect_flutter_project "${project_name}" "${has_dockerfile}" "${has_debian_control}"
+        return
+    fi
+
+    # A Debian package may hold a package.json for its tooling: the control file wins.
+    if [ "${has_debian_control}" = 'true' ]; then
+        print_type_and_kind 'debian' 'package'
         return
     fi
 
@@ -78,7 +107,7 @@ detect_type_and_kind() {
         return
     fi
 
-    fail 'Projet non reconnu' "Ni pubspec.yaml (Flutter) ni package.json (Node.js) à la racine de ${project_name}, et pas de suffixe ${DATABASE_SUFFIX} : la CI ne sait pas quel type de projet construire."
+    refuse_unknown_project "${project_name}"
 }
 
 #==========#
@@ -103,10 +132,12 @@ detect_database_project() {
 detect_flutter_project() {
     local project_name="$1"
     local has_dockerfile="$2"
+    local has_debian_control="$3"
 
     case "${project_name}" in
         *"${LIBRARY_SUFFIX}")
             refuse_library_with_dockerfile "${project_name}" "${has_dockerfile}"
+            refuse_library_with_debian_control "${project_name}" "${has_debian_control}"
             print_type_and_kind 'flutter' 'library'
             return
             ;;
@@ -121,12 +152,12 @@ detect_flutter_project() {
             ;;
     esac
 
-    if [ "${has_dockerfile}" = 'true' ]; then
+    if [ "${has_dockerfile}" = 'true' ] || [ "${has_debian_control}" = 'true' ]; then
         print_type_and_kind 'flutter' 'application'
         return
     fi
 
-    echo "::warning title=Librairie Flutter sans suffixe::${project_name} a un pubspec.yaml, sans Dockerfile ni suffixe : il est traité comme une librairie. Renommez le dépôt en *${LIBRARY_SUFFIX} pour le confirmer, ou en *${APPLICATION_SUFFIX} si c'est une application mobile." >&2
+    echo "::warning title=Librairie Flutter sans suffixe::${project_name} a un pubspec.yaml, sans Dockerfile, ni ${DEBIAN_CONTROL_FILE}, ni suffixe : il est traité comme une librairie. Renommez le dépôt en *${LIBRARY_SUFFIX} pour le confirmer, ou en *${APPLICATION_SUFFIX} si c'est une application mobile." >&2
     print_type_and_kind 'flutter' 'library'
 }
 
@@ -175,7 +206,7 @@ detect_node_application_type() {
 }
 
 #=========#
-# Helpers #
+# Refusal #
 #=========#
 
 refuse_library_with_dockerfile() {
@@ -186,6 +217,40 @@ refuse_library_with_dockerfile() {
         fail 'Librairie avec un Dockerfile' "${project_name} se termine par ${LIBRARY_SUFFIX} mais a un Dockerfile : une librairie ne publie pas d'image. Supprimez le Dockerfile, ou renommez le dépôt en *${APPLICATION_SUFFIX}."
     fi
 }
+
+refuse_library_with_debian_control() {
+    local project_name="$1"
+    local has_debian_control="$2"
+
+    if [ "${has_debian_control}" = 'true' ]; then
+        fail 'Librairie avec un paquet Debian' "${project_name} se termine par ${LIBRARY_SUFFIX} mais a un ${DEBIAN_CONTROL_FILE} : une librairie Flutter ne publie pas de paquet Debian. Supprimez le dossier DEBIAN, ou renommez le dépôt en *${APPLICATION_SUFFIX}."
+    fi
+}
+
+# DEBIAN/ alone is most likely a package whose control file was forgotten: without this
+# check, the project would silently be detected as something else.
+refuse_debian_folder_without_control() {
+    local project_name="$1"
+    local has_debian_control="$2"
+
+    if [ -d DEBIAN ] && [ "${has_debian_control}" = 'false' ]; then
+        fail 'DEBIAN/control manquant' "${project_name} a un dossier DEBIAN sans fichier control : c'est lui qui décrit le paquet Debian (Package, Version, Architecture, Maintainer, Description). Voir debian/README.md de Github-ci."
+    fi
+}
+
+refuse_unknown_project() {
+    local project_name="$1"
+
+    if [ -f "${DEBIAN_SOURCE_CONTROL_FILE}" ]; then
+        fail 'Paquet source Debian' "${project_name} a un ${DEBIAN_SOURCE_CONTROL_FILE} : c'est un paquet source Debian, construit avec dpkg-buildpackage, que la CI ne sait pas construire. Elle construit les paquets décrits par un ${DEBIAN_CONTROL_FILE} en majuscules, à côté de l'arborescence installée (usr/, etc/…). Voir debian/README.md de Github-ci."
+    fi
+
+    fail 'Projet non reconnu' "Ni pubspec.yaml (Flutter), ni ${DEBIAN_CONTROL_FILE} (paquet Debian), ni package.json (Node.js) à la racine de ${project_name}, et pas de suffixe ${DATABASE_SUFFIX} : la CI ne sait pas quel type de projet construire."
+}
+
+#========#
+# Output #
+#========#
 
 print_type_and_kind() {
     local type="$1"

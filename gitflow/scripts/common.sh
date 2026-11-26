@@ -82,3 +82,29 @@ format_pubspec_version() {
 
     echo "${version}+${version_code}"
 }
+
+#========#
+# Debian #
+#========#
+
+# The control file of a Debian package: a project that has it builds a .deb file.
+readonly DEBIAN_CONTROL_FILE='DEBIAN/control'
+
+# Prints the value of a field of a Debian control file read on the standard input, for
+# example "1.5.0" for the field "Version". Field names ignore the case, as in dpkg. Prints
+# nothing when the field is missing.
+read_debian_control_field() {
+    local field_name="$1"
+
+    sed --quiet --regexp-extended "/^${field_name}:/I { s/^[^:]+:[[:space:]]*//; s/[[:space:]]+$//; p; q }"
+}
+
+# Prints the Debian version of a gitflow version: "1.5.0-rc.2" becomes "1.5.0~rc.2". For
+# dpkg, a "-" starts the Debian revision, which would sort the release candidate after
+# "1.5.0"; a "~" sorts it before, so the final version installs over its release candidates.
+to_debian_version() {
+    local version="$1"
+    local release_candidate_separator='~'
+
+    echo "${version/-/${release_candidate_separator}}"
+}

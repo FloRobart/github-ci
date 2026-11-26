@@ -2,7 +2,7 @@
 
 La CI d'un projet Flutter, git flow compris :
 
-- une **application** : la version web en image Docker s'il y a un `Dockerfile`, et Android. Sans les secrets de signature, un APK signé avec la clé de debug est attaché à la GitHub Release. Avec eux, l'APK et l'AAB signés sont attachés, puis l'AAB est envoyé sur Google Play. L'APK est construit comme F-Droid le reconstruit : F-Droid peut donc publier ce même APK, sans rien demander à la CI ([F-Droid](#f-droid)) ;
+- une **application** : la version web en image Docker s'il y a un `Dockerfile`, et Android. Sans les secrets de signature, un APK signé avec la clé de debug est attaché à la GitHub Release. Avec eux, l'APK et l'AAB signés sont attachés, puis l'AAB est envoyé sur Google Play. L'APK est construit comme F-Droid le reconstruit : F-Droid peut donc publier ce même APK, sans rien demander à la CI ([F-Droid](#f-droid)). Avec un `DEBIAN/control`, la version Linux est aussi attachée en paquet Debian `.deb` ([Debian](#debian)) ;
 - une **librairie** : le tag git et la GitHub Release, puis pub.dev.
 
 | Moment | Ce qui tourne |
@@ -15,16 +15,16 @@ Le workflow est [.github/workflows/flutter.yml](../.github/workflows/flutter.yml
 
 ## Application ou librairie
 
-Un projet Flutter est un projet avec un `pubspec.yaml` à la racine, même s'il a aussi un `package.json` pour ses outils. Le reste se lit dans le nom du dépôt et le `Dockerfile` :
+Un projet Flutter est un projet avec un `pubspec.yaml` à la racine, même s'il a aussi un `package.json` pour ses outils. Le reste se lit dans le nom du dépôt, le `Dockerfile` et le `DEBIAN/control` :
 
-| Nom du dépôt | Dockerfile | Type | Publié |
+| Nom du dépôt | `Dockerfile` ou `DEBIAN/control` | Type | Publié |
 |---|---|---|---|
-| `mon-projet-lib` | Interdit | Librairie | Tag, GitHub Release, pub.dev |
-| `mon-projet-app` | Facultatif : sans lui, application mobile uniquement | Application | Image web (avec un `Dockerfile`), Android |
-| Sans suffixe | Présent | Application | Image web, Android |
-| Sans suffixe | Absent | Librairie, avec un avertissement | Tag, GitHub Release, pub.dev |
+| `mon-projet-lib` | Interdits | Librairie | Tag, GitHub Release, pub.dev |
+| `mon-projet-app` | Facultatifs : sans eux, application mobile uniquement | Application | Image web (avec un `Dockerfile`), Android, paquet Debian (avec un `DEBIAN/control`) |
+| Sans suffixe | L'un des deux au moins | Application | Image web, Android, paquet Debian, selon les fichiers |
+| Sans suffixe | Aucun | Librairie, avec un avertissement | Tag, GitHub Release, pub.dev |
 
-Une application mobile sans `Dockerfile` doit donc finir par `-app` : sinon elle est prise pour une librairie. Toutes les règles sont dans [gitflow/README.md → Type de projet](../gitflow/README.md#type-de-projet).
+Une application mobile sans `Dockerfile` ni `DEBIAN/control` doit donc finir par `-app` : sinon elle est prise pour une librairie. Toutes les règles sont dans [gitflow/README.md → Type de projet](../gitflow/README.md#type-de-projet).
 
 ## Prérequis du projet
 
@@ -33,6 +33,7 @@ Une application mobile sans `Dockerfile` doit donc finir par `-app` : sinon elle
 - Un code formaté par `dart format` : la qualité refuse un fichier mal formaté.
 - Pour l'image web d'une application : un `Dockerfile` à la racine qui construit **lui-même** la version web. [example/Dockerfile](example/Dockerfile) le fait en deux étapes, un build Flutter puis nginx.
 - Pour publier une application sur Google Play : la [signature](#signature) et [Google Play](#google-play), décrits plus bas.
+- Pour publier une application en paquet Debian : la plateforme Linux activée, un `DEBIAN/control` et un fichier `.desktop`, voir [Debian](#debian).
 - Pour publier une librairie sur pub.dev : voir [pub.dev](#pubdev).
 
 ## Installation
@@ -62,8 +63,10 @@ Le job doit garder l'identifiant `ci` : le ruleset attend les vérifications `ci
 | `docker-image` | `true` | Publie la version web d'une application en image Docker, si elle a un `Dockerfile`. `false` pour ne pas la publier malgré le `Dockerfile`. |
 | `android` | `true` | Construit la version Android d'une application. `false` pour une application uniquement web. |
 | `google-play-track` | `production` | Piste Google Play qui reçoit une version finale : `production`, `beta` (test ouvert), `alpha` (test fermé) ou `internal` (test interne). |
+| `debian` | `true` | Construit le paquet Debian d'une application qui a un `DEBIAN/control`. `false` pour ne pas le publier malgré le fichier. |
+| `debian-image` | `debian:12` | Image Docker dans laquelle la version Linux est construite, puis son paquet installé pour être testé. Choisir le plus ancien système sur lequel le paquet doit s'installer. |
 
-Une librairie ignore `docker-image`, `android` et `google-play-track`. Les mêmes options existent sur [auto.yml](../auto/README.md#options).
+Une librairie ignore `docker-image`, `android`, `google-play-track`, `debian` et `debian-image`. Les mêmes options existent sur [auto.yml](../auto/README.md#options).
 
 ```yaml
 jobs:
@@ -100,9 +103,10 @@ La version exacte rend les builds reproductibles. Elle doit exister sur le canal
 4. `flutter test`
 5. Pour une application, le build de ce que la release construit, sans rien publier :
    - Android, si l'option `android` est active : `flutter build apk --debug`, sans besoin des secrets de signature ;
-   - l'image Docker, si l'option `docker-image` est active et qu'il y a un `Dockerfile` : construite mais jamais poussée.
+   - l'image Docker, si l'option `docker-image` est active et qu'il y a un `Dockerfile` : construite mais jamais poussée ;
+   - le paquet Debian, si l'option `debian` est active et qu'il y a un `DEBIAN/control` : `flutter build linux --release` sur la machine de GitHub, puis le `.deb` et ses contrôles (voir [Debian](#debian)), sauf l'installation dans un système propre, faite par la release seulement.
 
-Un build Android ou un `Dockerfile` cassé est donc vu dans la pull request, et pas au moment de la release. Une librairie n'a rien à construire : `flutter analyze` compile déjà tout son code.
+Un build Android, Linux ou un `Dockerfile` cassé est donc vu dans la pull request, et pas au moment de la release. Une librairie n'a rien à construire : `flutter analyze` compile déjà tout son code.
 
 Quand la version de Flutter est fixée (option `flutter-version` ou version exacte du `pubspec.yaml`), `--enforce-lockfile` fait échouer le job au lieu de modifier le `pubspec.lock`. Dans ces cas, lancer `flutter pub get` avec la version de Flutter de la CI, puis commiter le `pubspec.lock` :
 
@@ -375,3 +379,89 @@ Le nom de paquet (`applicationId`) est lu dans l'APK construit : rien à configu
 - Un compte développeur personnel récent doit passer par un test fermé avant d'avoir accès à la production : régler alors `google-play-track: alpha` le temps de l'obtenir.
 - Une version déjà reçue par Google Play est refusée une seconde fois (`versionCode` déjà utilisé) : ne relancer le job que si l'envoi lui-même a échoué.
 - L'envoi est soumis à la validation de Google : la version n'est visible qu'une fois validée.
+
+## Debian
+
+Une application qui a un fichier **`DEBIAN/control`** à la racine publie aussi sa version Linux en paquet Debian : un `.deb` attaché à la GitHub Release, à côté de l'APK, pour chaque release candidate et chaque version finale. Il n'y a pas de store : le paquet s'installe avec `sudo apt install ./<nom>-vX.Y.Z.deb`.
+
+Les règles du paquet (champs de `DEBIAN/control`, ce que la CI ajoute, version `X.Y.Z~rc.N` d'une release candidate, contrôles) sont celles de [debian/README.md](../debian/README.md). Ce qui suit ne concerne que Flutter.
+
+### Ce que le projet écrit
+
+Seulement deux fichiers, à la racine du dépôt :
+
+```text
+mon-app/
+├── DEBIAN/control
+├── usr/share/applications/mon-app.desktop
+├── linux/                ← plateforme Linux de Flutter
+├── lib/
+└── pubspec.yaml
+```
+
+Tout le reste vient du build de Flutter. La CI ajoute au paquet :
+
+| Chemin installé | Contenu |
+|---|---|
+| `/opt/<paquet>/` | Le bundle de `flutter build linux` : l'exécutable, `lib/` et `data/` |
+| `/usr/bin/<paquet>` | Lien vers l'exécutable : la commande du `.desktop` et du terminal |
+
+`<paquet>` est le champ `Package` de `DEBIAN/control`. Le dépôt ne doit avoir ni `opt/<paquet>/` ni `usr/bin/<paquet>` : la CI échoue plutôt que de les écraser.
+
+1. **Activer la plateforme Linux**, puis commiter le dossier `linux/` :
+
+   ```bash
+   flutter create --platforms=linux .
+   ```
+
+2. **Écrire `DEBIAN/control`** :
+
+   ```text
+   Package: mon-app
+   Version: 1.0.0
+   Architecture: amd64
+   Maintainer: Prénom Nom <adresse@exemple.fr>
+   Depends: libgtk-3-0
+   Section: utils
+   Priority: optional
+   Description: Résumé en une ligne
+    Description longue, chaque ligne commençant par une espace.
+   ```
+
+   - `Architecture` doit valoir `amd64` : la CI construit la version Linux sur une machine amd64, et échoue sinon.
+   - `Depends` liste les bibliothèques système que l'application charge. Flutter a besoin de GTK 3 (`libgtk-3-0`), qui amène le reste. Un plugin peut en demander d'autres, par exemple `libsecret-1-0` pour `flutter_secure_storage`. La release les vérifie : voir [Construction et contrôles](#construction-et-contrôles).
+
+3. **Écrire le fichier `.desktop`**, qui fait apparaître l'application dans le menu :
+
+   ```ini
+   [Desktop Entry]
+   Type=Application
+   Name=Mon App
+   Comment=Résumé en une ligne
+   Exec=mon-app
+   Icon=/opt/mon-app/data/flutter_assets/assets/icon.png
+   Terminal=false
+   Categories=Utility;
+   ```
+
+   - `Exec` est la valeur de `Package` : le lien `/usr/bin/<paquet>`.
+   - `Icon` peut pointer vers une image des assets Flutter, installée dans `/opt/<paquet>/data/flutter_assets/` avec le reste du bundle : c'est le chemin de l'asset dans le `pubspec.yaml`, par exemple `assets/icon.png`. Une icône peut aussi être ajoutée au dépôt, dans `usr/share/icons/hicolor/256x256/apps/mon-app.png`, avec `Icon=mon-app`.
+   - `Categories` : une des [catégories du standard freedesktop](https://specifications.freedesktop.org/menu-spec/latest/category-registry.html), suivie d'un `;`.
+
+La CI échoue s'il n'y a aucun fichier `.desktop` dans `usr/share/applications/`, ou si `desktop-file-validate` en refuse un.
+
+### Construction et contrôles
+
+Un build Linux de Flutter dépend des bibliothèques du système qui le construit : construit sur un système récent, il ne démarre pas sur un plus ancien. La release construit donc l'application **dans un conteneur de l'option `debian-image`** (`debian:12` par défaut), le plus ancien système visé, puis :
+
+1. le paquet est construit, avec la version de la release ;
+2. il est **installé dans un conteneur neuf de la même image**, qui n'a que le système de base : `apt` installe les `Depends`, puis chaque exécutable doit trouver ses bibliothèques. Une bibliothèque introuvable arrête la release, avant toute publication : il manque un paquet dans `Depends`. Le paquet est ensuite désinstallé ;
+3. les fichiers `.desktop` sont vérifiés, et les remarques de lintian affichées dans le résumé du run.
+
+Le paquet s'installe ensuite sur `debian-image` et sur les systèmes plus récents. Avec `debian:12` : Debian 12 et 13, Ubuntu 24.04 et suivantes.
+
+- La version de Flutter est la même que pour Android : voir [Version de Flutter](#version-de-flutter). Une release candidate reçoit sa version en options de build, comme pour Android.
+- Rien n'est mis en cache dans le conteneur : Flutter et les dépendances sont téléchargés à chaque release.
+- Seule l'architecture `amd64` est construite : `flutter build linux` ne construit que pour la machine qui le lance.
+
+Le job qualité construit lui aussi le paquet, sur la machine de GitHub, pour voir dans la pull request un build Linux cassé, un `DEBIAN/control` incomplet ou un `.desktop` invalide. Il ne fait pas le test d'installation : construite sur cette machine plus récente, l'application ne pourrait pas être testée sur `debian-image`.

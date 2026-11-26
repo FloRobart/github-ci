@@ -13,7 +13,12 @@ name: Flutter
 #                   attached to the release
 #                   Android, with the signing secrets: signed APK and AAB attached to the
 #                   release, then the AAB sent to Google Play (final version only)
+#                   Debian package, when there is a DEBIAN/control: .deb attached to the release
 #   Library      →  git tag and GitHub Release, then pub.dev (final version only)
+#
+# The Debian package holds the Linux version of the application, built in a container of
+# the "debian-image" input so that it installs on that system and the newer ones. It is
+# then installed and removed in a clean container of the same image (debian/README.md).
 #
 # The Android release is built like F-Droid's build server rebuilds it, so that F-Droid can
 # publish the signed APK of the GitHub Release itself: F-Droid follows the tags on its own,
@@ -23,14 +28,15 @@ name: Flutter
 # The quality job ends by building an application the way its release does, without
 # publishing anything, so a broken build is seen in the pull request rather than at
 # release time: the Android APK (debug build, no signing needed) when "android" is on,
-# and the Docker image when "docker-image" is on and there is a Dockerfile. A library
-# has nothing to build: "flutter analyze" already compiles all its code.
+# the Docker image when "docker-image" is on and there is a Dockerfile, and the Debian
+# package when "debian" is on and there is a DEBIAN/control. A library has nothing to
+# build: "flutter analyze" already compiles all its code.
 #
 # Google Play and pub.dev come after the GitHub Release, like the stores of extension.yml:
 # a refused version leaves the tag and the back-merge untouched, and each one is skipped
 # while its secret is missing.
 #
-# Only the quality, Android, Google Play and pub.dev jobs are specific to Flutter: every
+# Only the quality, Android, Debian, Google Play and pub.dev jobs are specific to Flutter: every
 # gitflow step comes from the gitflow-*.yml workflows. See flutter/README.md for the
 # project requirements.
 #
@@ -70,6 +76,19 @@ on:
         description: Google Play track receiving a final version, for example "production", "beta", "alpha" or "internal".
         type: string
         default: production
+      debian:
+        description: Builds the Debian package of an application that has a DEBIAN/control file, and attaches it to the release.
+        type: boolean
+        default: true
+      debian-image:
+        description: Docker image the Linux application is built and its Debian package tested in, for example "debian:12" or "ubuntu:24.04". Pick the oldest system the package must install on.
+        type: string
+        default: 'debian:12'
+
+# The Linux build of the CI targets the amd64 architecture only: "flutter build linux"
+# builds for the machine it runs on, a GitHub runner.
+env:
+  LINUX_BUNDLE_DIRECTORY: build/linux/x64/release/bundle
 
 # One run at a time per branch: two clicks on the button, or two merges on main, wait
 # for each other. A pull request only keeps its latest run.
@@ -205,6 +224,34 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Built on the runner, only to see a broken build or a broken package in the pull
+      # request. The release builds in the container of "debian-image", then installs the
+      # package in a clean one: built here, against the newer libraries of the runner, the
+      # application could not be tested there.
+      - name: Install the Linux build tools
+        if: >-
+          inputs.debian
+          && steps.project.outputs.kind == 'application'
+          && steps.project.outputs.has-debian-control == 'true'
+        run: |
+          sudo apt-get update --quiet=2
+          sudo apt-get install --yes --quiet=2 --no-install-recommends ninja-build libgtk-3-dev lintian desktop-file-utils > /dev/null
+
+      - name: Build the Debian package
+        if: >-
+          inputs.debian
+          && steps.project.outputs.kind == 'application'
+          && steps.project.outputs.has-debian-control == 'true'
+        run: |
+          flutter build linux --release
+
+          package_directory="${RUNNER_TEMP}/debian-package"
+          package_file='build/debian/package.deb'
+          stage-debian-package.sh "${package_directory}"
+          add-flutter-bundle-to-debian-package.sh "${package_directory}" "${LINUX_BUNDLE_DIRECTORY}"
+          build-debian-package.sh "${package_directory}" "${package_file}"
+          check-debian-package.sh "${package_file}" >> "${GITHUB_STEP_SUMMARY}"
 
   #=========#
   # Release #
@@ -383,32 +430,14 @@ jobs:
           "${flutter_directory}/bin/flutter" config --no-analytics
           "${flutter_directory}/bin/flutter" --version
 
-      # A final version is built exactly as F-Droid rebuilds its tag: its versionName and
-      # versionCode come from the committed pubspec.yaml, checked by its pull request. A
-      # release candidate is built before its version commit, so it gets them as options:
-      # "X.Y.Z", without the "-rc.N" that stores refuse, and the versionCode of "X.Y.Z".
-      # With a pinned Flutter, the lockfile is enforced, as in the quality job and in
-      # F-Droid's recipe. The options are shared by the build and by the F-Droid check.
+      # A final version is built exactly as F-Droid rebuilds its tag, from the committed
+      # pubspec.yaml; a release candidate gets its version as options. With a pinned
+      # Flutter, the lockfile is enforced, as in F-Droid's recipe. The options are shared
+      # by the build and by the F-Droid check.
       - name: Choose the build options
         env:
           FLUTTER_VERSION: ${{ steps.flutter-version.outputs.version }}
-        run: |
-          build_options='--release'
-          if [ "${KIND}" = 'candidate' ]; then
-            build_name="${VERSION%%-*}"
-            build_number=$(compute-android-version-code.sh "${build_name}")
-            build_options="${build_options} --build-name=${build_name} --build-number=${build_number}"
-          fi
-
-          pub_get_options=''
-          if [ -n "${FLUTTER_VERSION}" ]; then
-            pub_get_options='--enforce-lockfile'
-          fi
-
-          {
-            echo "BUILD_OPTIONS=${build_options}"
-            echo "PUB_GET_OPTIONS=${pub_get_options}"
-          } >> "${GITHUB_ENV}"
+        run: choose-flutter-build-options.sh "${KIND}" "${VERSION}" "${FLUTTER_VERSION}" >> "${GITHUB_ENV}"
 
       # Writes the files read by android/app/build.gradle(.kts), as described in the Flutter
       # documentation ("Sign the app"). Without them, Flutter signs the release with the
@@ -513,17 +542,89 @@ jobs:
       - name: Upload the release files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-assets
+          name: release-assets-android
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The Linux application is built in a container of "debian-image", against the libraries
+  # of the oldest system the package targets. The package is then installed and removed in
+  # a clean container of the same image: a library missing from Depends stops the release.
+  debian:
+    name: Debian package
+    if: >-
+      inputs.debian
+      && needs.prepare-release.outputs.project-kind == 'application'
+      && needs.prepare-release.outputs.has-debian-control == 'true'
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    # Nothing is cached in the build container: Flutter and the dependencies are
+    # downloaded at every release.
+    timeout-minutes: 45
+
+    env:
+      KIND: ${{ needs.prepare-release.outputs.kind }}
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+      DEBIAN_IMAGE: ${{ inputs.debian-image }}
+      PACKAGE_FILE: release-assets/${{ needs.prepare-release.outputs.project-name }}-${{ needs.prepare-release.outputs.tag }}.deb
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load the gitflow scripts
+        uses: FloRobart/github-ci/gitflow/scripts@main
+
+      - name: Resolve the Flutter version
+        id: flutter-version
+        env:
+          REQUESTED_FLUTTER_VERSION: ${{ inputs.flutter-version }}
+        run: resolve-flutter-version.sh "${REQUESTED_FLUTTER_VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Choose the build options
+        env:
+          FLUTTER_VERSION: ${{ steps.flutter-version.outputs.version }}
+        run: choose-flutter-build-options.sh "${KIND}" "${VERSION}" "${FLUTTER_VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Build the Linux application
+        env:
+          FLUTTER_VERSION: ${{ steps.flutter-version.outputs.version }}
+        run: run-in-docker-image.sh "${DEBIAN_IMAGE}" build-flutter-linux-bundle.sh "${FLUTTER_VERSION}" "${PUB_GET_OPTIONS}" "${BUILD_OPTIONS}"
+
+      - name: Build the Debian package
+        run: |
+          package_directory="${RUNNER_TEMP}/debian-package"
+          stage-debian-package.sh "${package_directory}"
+          add-flutter-bundle-to-debian-package.sh "${package_directory}" "${LINUX_BUNDLE_DIRECTORY}"
+          build-debian-package.sh "${package_directory}" "${PACKAGE_FILE}" "${VERSION}"
+
+      - name: Install and remove the package
+        run: run-in-docker-image.sh "${DEBIAN_IMAGE}" install-and-remove-debian-package.sh "${PACKAGE_FILE}"
+
+      - name: Check the package
+        run: |
+          sudo apt-get update --quiet=2
+          sudo apt-get install --yes --quiet=2 --no-install-recommends lintian desktop-file-utils > /dev/null
+          check-debian-package.sh "${PACKAGE_FILE}" >> "${GITHUB_STEP_SUMMARY}"
+
+      # Picked up by gitflow-publish-release.yml and attached to the release.
+      - name: Upload the release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets-debian
           path: release-assets/
           if-no-files-found: error
           retention-days: 7
 
   publish-release:
     name: Publish release
-    # The Docker image and the Android build can each be skipped (turned off, mobile
-    # application, library): a skipped job is fine, a failed one stops the release.
+    # The Docker image, the Android build and the Debian package can each be skipped
+    # (turned off, mobile application, library): a skipped job is fine, a failed one stops
+    # the release.
     if: ${{ !failure() && !cancelled() && needs.prepare-release.result == 'success' }}
-    needs: [prepare-release, docker-image, android]
+    needs: [prepare-release, docker-image, android, debian]
     uses: FloRobart/github-ci/.github/workflows/gitflow-publish-release.yml@main
     secrets: inherit
     permissions:
@@ -535,7 +636,7 @@ jobs:
       tag: ${{ needs.prepare-release.outputs.tag }}
       previous-tag: ${{ needs.prepare-release.outputs.previous-tag }}
       new-release-branch: ${{ needs.prepare-release.outputs.new-release-branch }}
-      release-assets: ${{ needs.android.result == 'success' }}
+      release-assets: ${{ needs.android.result == 'success' || needs.debian.result == 'success' }}
 
   #========#
   # Stores #
@@ -579,7 +680,7 @@ jobs:
         if: steps.secrets.outputs.configured == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-assets
+          name: release-assets-android
           path: release-assets
 
       # Read in the built APK rather than in the Gradle files, which can set the

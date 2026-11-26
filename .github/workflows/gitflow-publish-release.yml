@@ -8,7 +8,7 @@ name: Gitflow publish release
 #   Other release candidate      →  version written in the files of the branch when needed, pre-release
 #   Final version (main)         →  release, pull request main → dev (back-merge)
 #
-# The version files (package.json, package-lock.json, pubspec.yaml) get the final version
+# The version files (package.json, package-lock.json, pubspec.yaml, DEBIAN/control) get the final version
 # "X.Y.Z" on the release or hotfix branch, so main carries it once the branch is merged.
 # A release candidate is tagged on that version commit.
 #
@@ -43,7 +43,7 @@ on:
         type: string
         default: ''
       release-assets:
-        description: Attaches the files of the "release-assets" artifact of the run to the release.
+        description: Attaches the files of the "release-assets*" artifacts of the run to the release, for example "release-assets-android" and "release-assets-debian".
         type: boolean
         default: false
 
@@ -110,11 +110,14 @@ jobs:
       # GitHub Release #
       #================#
 
+      # Every build job of the type CI uploads its own artifact, since two jobs cannot upload
+      # the same one: they are merged into a single folder.
       - name: Download the release assets
         if: inputs.release-assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-assets
+          pattern: release-assets*
+          merge-multiple: true
           path: release-assets
 
       # A release candidate is tagged on its version commit, a final version on the merge into main.

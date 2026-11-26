@@ -5,6 +5,7 @@ name: Auto
 #
 #   name ending with "-database", Dockerfile      →  database.yml   (migrations image)
 #   pubspec.yaml                                  →  flutter.yml    (application or library)
+#   DEBIAN/control                                →  debian.yml     (Debian package)
 #   package.json, name ending with "-extension"   →  extension.yml
 #   package.json, "astro" dependency, Dockerfile  →  astro.yml
 #   package.json                                  →  nodejs.yml     (application or library)
@@ -49,6 +50,14 @@ on:
         description: Google Play track receiving a final version (Flutter projects).
         type: string
         default: production
+      debian:
+        description: Builds the Debian package of a Flutter application that has a DEBIAN/control file (Flutter projects).
+        type: boolean
+        default: true
+      debian-image:
+        description: Docker image a Debian package is tested in, and a Flutter application built in for its package. Pick the oldest system the package must install on (Debian and Flutter projects).
+        type: string
+        default: 'debian:12'
       postgres-version:
         description: PostgreSQL version the migrations are tested on (database projects).
         type: string
@@ -119,6 +128,20 @@ jobs:
       docker-image: ${{ inputs.docker-image }}
       android: ${{ inputs.android }}
       google-play-track: ${{ inputs.google-play-track }}
+      debian: ${{ inputs.debian }}
+      debian-image: ${{ inputs.debian-image }}
+
+  debian:
+    name: Project
+    needs: detect
+    if: needs.detect.outputs.type == 'debian'
+    uses: FloRobart/github-ci/.github/workflows/debian.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      debian-image: ${{ inputs.debian-image }}
 
   nodejs:
     name: Project

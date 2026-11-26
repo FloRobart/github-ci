@@ -63,9 +63,10 @@ La CI devine le type du projet à partir des fichiers à la racine **et** du suf
 | Site Astro | libre (ex. `portfolio`) | `package.json` (avec la dépendance `astro`) + `Dockerfile` | Image Docker |
 | Librairie Node.js | `…-lib` | `package.json`, **sans** `Dockerfile` | Paquet npm |
 | Extension navigateur | `…-extension` | `package.json` | `.zip`, Chrome Web Store, Firefox |
-| Application Flutter | `…-app`, ou libre avec un `Dockerfile` | `pubspec.yaml` (+ `Dockerfile` pour la version web) | APK / AAB, Google Play, image web |
-| Librairie Flutter | `…-lib` | `pubspec.yaml`, **sans** `Dockerfile` | GitHub Release, pub.dev |
+| Application Flutter | `…-app`, ou libre avec un `Dockerfile` ou un `DEBIAN/control` | `pubspec.yaml` (+ `Dockerfile` pour la version web, + `DEBIAN/control` pour la version Linux) | APK / AAB, Google Play, image web, paquet Debian `.deb` |
+| Librairie Flutter | `…-lib` | `pubspec.yaml`, **sans** `Dockerfile` ni `DEBIAN/control` | GitHub Release, pub.dev |
 | Migrations de base de données | `…-database` | `Dockerfile` | Image Docker `…-migrations` |
+| Paquet Debian | libre (ex. `apt-auto-update`) | `DEBIAN/control` + l'arborescence installée (`usr/`, `etc/`…) | Paquet Debian `.deb` |
 
 **Pour renommer un dépôt** : **Settings** → **General** → champ **Repository name** → **Rename**.
 
@@ -125,6 +126,14 @@ La CI échoue si un prérequis manque. Fais-le sur ta branche de travail en loca
 
 4. Pour une version web en image Docker : un `Dockerfile` qui construit lui-même le web (modèle : [flutter/example/Dockerfile](flutter/example/Dockerfile)).
 5. Pour Android : la version de Flutter fixée dans le `pubspec.yaml` (`environment: flutter: X.Y.Z`) et le `pubspec.lock` commité, pour que la release soit reproductible (voir [flutter/README.md → Environnement de build](flutter/README.md#environnement-de-build)).
+6. Pour un paquet Debian de la version Linux : la plateforme Linux activée (`flutter create --platforms=linux .`), un `DEBIAN/control` avec `Architecture: amd64`, et un fichier `usr/share/applications/<paquet>.desktop` (voir [flutter/README.md → Debian](flutter/README.md#debian)).
+
+### Si c'est un paquet Debian
+
+1. La racine du dépôt est l'arborescence installée : `DEBIAN/control`, puis les fichiers dans `usr/`, `etc/`, `opt/`, `srv/` ou `var/`. Le reste du dépôt (README, `.github/`…) n'entre pas dans le paquet.
+2. `DEBIAN/control` avec au moins `Package`, `Version` (`1.0.0` au départ), `Architecture`, `Maintainer` et `Description` (modèle : [debian/README.md → DEBIAN/control](debian/README.md#debiancontrol)).
+3. Les exécutables marqués comme tels dans git : `git update-index --chmod=+x usr/bin/<fichier>`.
+4. Pas de vérification locale à faire : la qualité de la première pull request construit le paquet, puis l'installe et le désinstalle dans un Debian propre (voir [debian/README.md → Le job qualité](debian/README.md#le-job-qualité)).
 
 ### Si c'est un projet de migrations (`…-database`)
 
@@ -524,6 +533,7 @@ git commit -am "docs: test the CI" && git push -u origin feature/test-ci
 | « Message de commit invalide » | Réécrire les messages au format `type: description` (`feat`, `fix`, `docs`, `chore`, `ci`, `refactor`, `test`…), puis `git push --force-with-lease`. |
 | `git push` refusé sur une nouvelle branche | Son nom n'est pas dans le git flow (étape 7.2) : la renommer en `feature/…`, `fix/…`, etc. |
 | « Projet non reconnu » / « Type de projet ambigu » | Revoir le nom du dépôt et les fichiers à la racine (étape 1). |
+| « Installation impossible » / « Bibliothèques manquantes » (paquet Debian) | Il manque un paquet dans `Depends` de `DEBIAN/control`, ou un script `postinst` échoue : voir [debian/README.md → Le job qualité](debian/README.md#le-job-qualité). |
 | Job **Quality** en échec sur un script npm | Ajouter le script manquant dans `package.json` (étape 2). |
 | « main non mergée dans dev » | Merger d'abord la PR de back-merge `main` → `dev`. |
 | La CI ne trouve pas `FloRobart/github-ci` | Dépôt Github-ci privé non partagé (étape 0.1). |

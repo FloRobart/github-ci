@@ -6,6 +6,7 @@
 #   pubspec.yaml                      "version:" line, with the Android versionCode as build
 #                                     number: "1.5.0+1005000", see format_pubspec_version
 #   package.json, package-lock.json   "version" field, through "npm version"
+#   DEBIAN/control                    "Version:" field
 #
 # Usage: write-version-files.sh <version, for example "1.5.0">
 
@@ -25,6 +26,10 @@ main() {
 
     if [ -f package.json ]; then
         write_package_version "${version}"
+    fi
+
+    if [ -f "${DEBIAN_CONTROL_FILE}" ]; then
+        write_debian_control_version "${version}"
     fi
 }
 
@@ -49,6 +54,19 @@ write_package_version() {
     local version="$1"
 
     npm version "${version}" --no-git-tag-version --allow-same-version --ignore-scripts > /dev/null
+}
+
+# dpkg requires the "Version:" field: a control file without it gets one, right after the
+# "Package:" field. Field names ignore the case, as in dpkg.
+write_debian_control_version() {
+    local version="$1"
+
+    if grep --quiet --ignore-case '^Version:' "${DEBIAN_CONTROL_FILE}"; then
+        sed --in-place --regexp-extended "s/^Version:.*/Version: ${version}/I" "${DEBIAN_CONTROL_FILE}"
+        return
+    fi
+
+    sed --in-place "/^Package:/I a Version: ${version}" "${DEBIAN_CONTROL_FILE}"
 }
 
 main "$@"

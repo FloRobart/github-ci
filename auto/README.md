@@ -7,10 +7,11 @@ flowchart LR
     project["ci.yml du projet<br/>identique partout"] --> detect["Detect<br/>detect-project.sh"]
     detect -- "-database + Dockerfile" --> database["database.yml"]
     detect -- "pubspec.yaml" --> flutter["flutter.yml"]
+    detect -- "DEBIAN/control" --> debian["debian.yml"]
     detect -- "package.json + -extension" --> extension["extension.yml"]
     detect -- "package.json + astro + Dockerfile" --> astro["astro.yml"]
     detect -- "package.json" --> nodejs["nodejs.yml"]
-    database & flutter & extension & astro & nodejs --> gitflow["gitflow-*.yml"]
+    database & flutter & debian & extension & astro & nodejs --> gitflow["gitflow-*.yml"]
 ```
 
 Le workflow est [.github/workflows/auto.yml](../.github/workflows/auto.yml). Il ne fait que choisir : toute la logique reste dans les CI de type et dans [gitflow](../gitflow/README.md).
@@ -20,7 +21,9 @@ Le workflow est [.github/workflows/auto.yml](../.github/workflows/auto.yml). Il 
 | Le projet a… | CI lancée | Ce qui est publié |
 |---|---|---|
 | `pubspec.yaml` + `Dockerfile`, ou un nom en `-app` | [Flutter](../flutter/README.md), application | Image Docker de la version web (s'il y a un `Dockerfile`) et Android : APK signé avec la clé de debug sans les secrets de signature, APK et AAB signés puis Google Play avec. L'APK signé est publiable tel quel par F-Droid |
+| `pubspec.yaml` + `DEBIAN/control` | [Flutter](../flutter/README.md), application | Comme ci-dessus, plus la version Linux en paquet Debian `.deb` |
 | `pubspec.yaml` seul, ou un nom en `-lib` | [Flutter](../flutter/README.md), librairie | Tag et GitHub Release, puis pub.dev |
+| `DEBIAN/control`, sans `pubspec.yaml` | [Debian](../debian/README.md) | Paquet Debian `.deb` |
 | `package.json` + `Dockerfile` | [Node.js](../nodejs/README.md), application | Image Docker |
 | `package.json` + `Dockerfile` + la dépendance `astro` | [Astro](../astro/README.md) | Image Docker |
 | `package.json` + un nom en `-extension` | [Extension](../extension/README.md) | Archive `.zip`, puis Chrome Web Store et addons.mozilla.org |
@@ -44,7 +47,7 @@ jobs:
     secrets: inherit
 ```
 
-- Le job doit garder l'identifiant `ci`. Les cinq jobs de type d'`auto.yml` s'appellent tous **Project**, si bien que les vérifications ont le même nom quel que soit le type : `ci / Project / Gitflow / Checks` et `ci / Project / Quality`. C'est ce qu'attend le ruleset.
+- Le job doit garder l'identifiant `ci`. Les six jobs de type d'`auto.yml` s'appellent tous **Project**, si bien que les vérifications ont le même nom quel que soit le type : `ci / Project / Gitflow / Checks` et `ci / Project / Quality`. C'est ce qu'attend le ruleset.
 - Le fichier d'exemple donne **toutes** les permissions, `id-token: write` compris, même à un projet Flutter : GitHub vérifie les permissions de chaque CI de type avant de lancer le run, y compris celles qui ne tourneront pas.
 
 ## Options
@@ -59,6 +62,8 @@ Toutes facultatives. Chacune est transmise à la CI de type qui s'en sert, les a
 | `docker-image` | `true` | Flutter | `false` pour ne pas publier l'image web malgré le `Dockerfile` |
 | `android` | `true` | Flutter | `false` pour une application uniquement web |
 | `google-play-track` | `production` | Flutter | Piste Google Play d'une version finale : `production`, `beta`, `alpha` ou `internal` |
+| `debian` | `true` | Flutter | `false` pour ne pas publier le paquet Debian malgré le `DEBIAN/control` |
+| `debian-image` | `debian:12` | Debian, Flutter | Image Docker dans laquelle le paquet Debian est testé, et la version Linux de Flutter construite : le plus ancien système visé. Voir [debian/README.md → Options](../debian/README.md#options) |
 | `postgres-version` | `18` | Database | Version de PostgreSQL sur laquelle les migrations sont testées |
 
 Une option rend le `ci.yml` différent des autres projets : ne l'ajouter que si la valeur par défaut ne convient pas.
@@ -74,7 +79,7 @@ jobs:
 
 ## Importer une CI de type directement
 
-Reste possible, avec le `ci.yml` d'exemple de chaque type ([nodejs](../nodejs/example/ci.yml), [astro](../astro/example/ci.yml), [flutter](../flutter/example/ci.yml), [extension](../extension/example/ci.yml), [database](../database/example/ci.yml)). Deux différences :
+Reste possible, avec le `ci.yml` d'exemple de chaque type ([nodejs](../nodejs/example/ci.yml), [astro](../astro/example/ci.yml), [flutter](../flutter/example/ci.yml), [extension](../extension/example/ci.yml), [database](../database/example/ci.yml), [debian](../debian/example/ci.yml)). Deux différences :
 
 - Les vérifications n'ont pas le niveau `Project` : `ci / Gitflow / Checks` et `ci / Quality`. Importer alors [protected-branches-type-ci.json](../gitflow/rulesets/protected-branches-type-ci.json) à la place de `protected-branches.json`.
 - La détection tourne quand même au moment de la release : une CI de type refuse de publier un projet détecté comme un autre type (« Mauvaise CI de type »).
