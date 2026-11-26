@@ -301,6 +301,12 @@ jobs:
     container:
       image: registry.gitlab.com/fdroid/fdroidserver:buildserver-trixie
 
+    # In a container, GitHub runs the steps with "sh" (dash in this image) instead of bash:
+    # "source", "read -a" and "<<<" would fail. The image comes with bash.
+    defaults:
+      run:
+        shell: bash
+
     outputs:
       signed: ${{ steps.publications.outputs.signed }}
 
