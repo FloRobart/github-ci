@@ -1,0 +1,160 @@
+name: Debian
+
+# Reusable workflow (owner: debian/): the CI of a Debian package, gitflow included.
+#
+#   Pull request           →  gitflow checks + quality (package built, checked, installed and removed)
+#   Button (Run workflow)  →  quality, then release candidate: .deb file + GitHub pre-release
+#   Merge on main          →  quality, then final version: .deb file + GitHub Release
+#
+# A Debian package is a project with a DEBIAN/control file and no pubspec.yaml
+# (gitflow/scripts/detect-project.sh). Its root is the tree of the package, as installed on
+# the system: DEBIAN/ and the folders etc/, opt/, srv/, usr/ and var/. The other files of the
+# repository (README, .github…) stay out of the package. Nothing is compiled: the CI only
+# builds the archive, with dpkg-deb. See debian/README.md for the project requirements.
+#
+# The package must work on a clean system: it is installed then removed in a new container
+# of the "debian-image" input, with nothing but its Depends. A missing dependency, a broken
+# maintainer script or a missing shared library stops the run. lintian, which checks the
+# rules of the Debian archive, is only reported in the summary of the run.
+#
+# Only the quality and package jobs are specific to Debian packages: every gitflow step
+# comes from the gitflow-*.yml workflows.
+
+on:
+  workflow_call:
+    inputs:
+      debian-image:
+        description: Docker image the package is installed in to be tested, for example "debian:12" or "ubuntu:24.04". Pick the oldest system the package must install on.
+        type: string
+        default: 'debian:12'
+
+# One run at a time per branch: two clicks on the button, or two merges on main, wait
+# for each other. A pull request only keeps its latest run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  #=========#
+  # Quality #
+  #=========#
+
+  gitflow-checks:
+    name: Gitflow
+    if: github.event_name == 'pull_request'
+    uses: FloRobart/github-ci/.github/workflows/gitflow-checks.yml@main
+
+  # The same checks as the release, with the version of DEBIAN/control.
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      DEBIAN_IMAGE: ${{ inputs.debian-image }}
+      PACKAGE_FILE: build/debian/package.deb
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load the gitflow scripts
+        uses: FloRobart/github-ci/gitflow/scripts@main
+
+      - name: Install the package tools
+        run: |
+          sudo apt-get update --quiet=2
+          sudo apt-get install --yes --quiet=2 --no-install-recommends lintian desktop-file-utils > /dev/null
+
+      - name: Build the package
+        run: |
+          package_directory="${RUNNER_TEMP}/debian-package"
+          stage-debian-package.sh "${package_directory}"
+          build-debian-package.sh "${package_directory}" "${PACKAGE_FILE}"
+
+      - name: Install and remove the package
+        run: run-in-docker-image.sh "${DEBIAN_IMAGE}" install-and-remove-debian-package.sh "${PACKAGE_FILE}"
+
+      - name: Check the package
+        run: check-debian-package.sh "${PACKAGE_FILE}" >> "${GITHUB_STEP_SUMMARY}"
+
+  #=========#
+  # Release #
+  #=========#
+
+  prepare-release:
+    name: Prepare release
+    if: github.event_name != 'pull_request'
+    needs: quality
+    uses: FloRobart/github-ci/.github/workflows/gitflow-prepare-release.yml@main
+    with:
+      project-type: debian
+
+  # Built from the commit of the run, with the version of the release: the committed
+  # DEBIAN/control of a release candidate does not carry it yet.
+  debian-package:
+    name: Debian package
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      DEBIAN_IMAGE: ${{ inputs.debian-image }}
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+      PACKAGE_FILE: release-assets/${{ needs.prepare-release.outputs.project-name }}-${{ needs.prepare-release.outputs.tag }}.deb
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load the gitflow scripts
+        uses: FloRobart/github-ci/gitflow/scripts@main
+
+      - name: Install the package tools
+        run: |
+          sudo apt-get update --quiet=2
+          sudo apt-get install --yes --quiet=2 --no-install-recommends lintian desktop-file-utils > /dev/null
+
+      - name: Build the package
+        run: |
+          package_directory="${RUNNER_TEMP}/debian-package"
+          stage-debian-package.sh "${package_directory}"
+          build-debian-package.sh "${package_directory}" "${PACKAGE_FILE}" "${VERSION}"
+
+      - name: Install and remove the package
+        run: run-in-docker-image.sh "${DEBIAN_IMAGE}" install-and-remove-debian-package.sh "${PACKAGE_FILE}"
+
+      - name: Check the package
+        run: check-debian-package.sh "${PACKAGE_FILE}" >> "${GITHUB_STEP_SUMMARY}"
+
+      # Picked up by gitflow-publish-release.yml and attached to the release.
+      - name: Upload the release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-release:
+    name: Publish release
+    needs: [prepare-release, debian-package]
+    uses: FloRobart/github-ci/.github/workflows/gitflow-publish-release.yml@main
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      kind: ${{ needs.prepare-release.outputs.kind }}
+      version: ${{ needs.prepare-release.outputs.version }}
+      tag: ${{ needs.prepare-release.outputs.tag }}
+      previous-tag: ${{ needs.prepare-release.outputs.previous-tag }}
+      new-release-branch: ${{ needs.prepare-release.outputs.new-release-branch }}
+      release-assets: true

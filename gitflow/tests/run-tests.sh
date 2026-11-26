@@ -2,7 +2,7 @@
 #
 # Tests of the gitflow scripts, run on throwaway git repositories.
 # No network, no GitHub: only the scripts that work with git alone are tested, a local
-# bare repository standing for GitHub. Needs jq and npm.
+# bare repository standing for GitHub. Needs jq, npm and dpkg-deb.
 #
 # Usage: gitflow/tests/run-tests.sh
 
@@ -118,15 +118,17 @@ test_image_name() {
     assert_fails 'nom vide refusé' to-image-name.sh '___'
 }
 
-# Creates a new directory holding the given empty files, then moves into it.
+# Creates a new directory holding the given empty files, then moves into it. A file path
+# may include folders, for example "DEBIAN/control".
 move_into_new_project() {
     local project_directory
     project_directory=$(mktemp -d "${WORKING_DIRECTORY}/project-XXXX")
     cd "${project_directory}"
 
-    local file_name
-    for file_name in "$@"; do
-        touch "${file_name}"
+    local file_path
+    for file_path in "$@"; do
+        mkdir -p "$(dirname "${file_path}")"
+        touch "${file_path}"
     done
 }
 
@@ -135,8 +137,9 @@ expected_project() {
     local type="$1"
     local kind="$2"
     local has_dockerfile="$3"
+    local has_debian_control="${4:-false}"
 
-    printf '%s\n' "type=${type}" "kind=${kind}" "has-dockerfile=${has_dockerfile}"
+    printf '%s\n' "type=${type}" "kind=${kind}" "has-dockerfile=${has_dockerfile}" "has-debian-control=${has_debian_control}"
 }
 
 test_flutter_project_detection() {
@@ -155,6 +158,15 @@ test_flutter_project_detection() {
 
     move_into_new_project pubspec.yaml package.json
     assert_equals 'pubspec.yaml prioritaire sur package.json' "$(expected_project flutter application false)" "$(detect-project.sh 'floraccess-app')"
+
+    move_into_new_project pubspec.yaml DEBIAN/control
+    assert_equals 'sans suffixe avec DEBIAN/control : application' "$(expected_project flutter application false true)" "$(detect-project.sh 'floraccess')"
+    assert_equals '-app avec DEBIAN/control : application' "$(expected_project flutter application false true)" "$(detect-project.sh 'floraccess-app')"
+    assert_equals 'DEBIAN/control : aucun avertissement' '' "$(detect-project.sh 'floraccess' 2>&1 > /dev/null)"
+    assert_fails '-lib avec DEBIAN/control refusé' detect-project.sh 'date-utils-lib'
+
+    rm DEBIAN/control
+    assert_fails 'dossier DEBIAN sans control refusé' detect-project.sh 'floraccess-app'
 }
 
 # Writes a pubspec.yaml with the given "environment:" block lines around the other "flutter:"
@@ -207,6 +219,63 @@ test_flutter_version_resolution() {
     assert_equals 'pas de pubspec.yaml : dernière stable' 'version=' "$(resolve-flutter-version.sh '' 2> /dev/null)"
 }
 
+test_android_version_code() {
+    echo 'compute-android-version-code.sh'
+
+    assert_equals 'X.Y.Z : X × 1000000 + Y × 1000 + Z' '1005002' "$(compute-android-version-code.sh '1.5.2')"
+    assert_equals 'version 0.Y.Z' '1000' "$(compute-android-version-code.sh '0.1.0')"
+    assert_equals 'nombres à deux chiffres' '4012003' "$(compute-android-version-code.sh '4.12.3')"
+    assert_equals 'plus grande version possible' '2099999999' "$(compute-android-version-code.sh '2099.999.999')"
+    assert_fails 'Y à 1000 refusé' compute-android-version-code.sh '1.1000.0'
+    assert_fails 'X à 2100 refusé' compute-android-version-code.sh '2100.0.0'
+    assert_fails 'release candidate refusée' compute-android-version-code.sh '1.5.0-rc.1'
+    assert_fails 'version incomplète refusée' compute-android-version-code.sh '1.5'
+}
+
+test_flutter_build_options() {
+    echo 'choose-flutter-build-options.sh'
+
+    assert_equals 'release candidate : version et versionCode de X.Y.Z' "$(printf '%s\n' 'BUILD_OPTIONS=--release --build-name=1.5.0 --build-number=1005000' 'PUB_GET_OPTIONS=--enforce-lockfile')" "$(choose-flutter-build-options.sh candidate '1.5.0-rc.2' '3.35.0')"
+    assert_equals 'version finale : fichiers commités' "$(printf '%s\n' 'BUILD_OPTIONS=--release' 'PUB_GET_OPTIONS=--enforce-lockfile')" "$(choose-flutter-build-options.sh final '1.5.0' '3.35.0')"
+    assert_equals 'Flutter non fixé : lockfile libre' "$(printf '%s\n' 'BUILD_OPTIONS=--release' 'PUB_GET_OPTIONS=')" "$(choose-flutter-build-options.sh final '1.5.0' '')"
+    assert_fails 'version sans versionCode possible refusée' choose-flutter-build-options.sh candidate '1.1000.0-rc.1' ''
+}
+
+# Writes android/app/build.gradle.kts with the given lines inside its defaultConfig block.
+write_gradle_default_config() {
+    local default_config_lines="$1"
+
+    mkdir -p android/app
+    printf 'android {\n    namespace = "fr.example.app"\n\n    defaultConfig {\n        // TODO: Specify your own unique Application ID.\n%b    }\n}\n' "${default_config_lines}" > android/app/build.gradle.kts
+}
+
+test_android_application_id() {
+    echo 'read-android-application-id.sh'
+
+    local warning_title='::warning title=applicationId introuvable::'
+    move_into_new_project
+
+    write_gradle_default_config '        applicationId = "fr.example.app"\n        applicationIdSuffix = ".debug"\n'
+    assert_equals 'Kotlin : applicationId lu' 'fr.example.app' "$(read-android-application-id.sh)"
+    assert_equals 'Kotlin : aucun avertissement' '' "$(read-android-application-id.sh 2>&1 > /dev/null)"
+
+    rm android/app/build.gradle.kts
+    printf 'android {\n    defaultConfig {\n        applicationId "fr.example.groovy"\n    }\n}\n' > android/app/build.gradle
+    assert_equals 'Groovy : applicationId lu' 'fr.example.groovy' "$(read-android-application-id.sh)"
+
+    rm android/app/build.gradle
+    write_gradle_default_config '        applicationId = "fr.example.free"\n        applicationId = "fr.example.paid"\n'
+    assert_equals 'deux applicationId : rien' '' "$(read-android-application-id.sh 2> /dev/null)"
+    assert_contains 'deux applicationId : avertissement' "${warning_title}" "$(read-android-application-id.sh 2>&1 > /dev/null)"
+
+    write_gradle_default_config '        applicationId = rootProject.extra["applicationId"] as String\n'
+    assert_equals 'applicationId dans une variable : rien' '' "$(read-android-application-id.sh 2> /dev/null)"
+
+    rm -r android
+    assert_equals 'pas de projet Android : rien' '' "$(read-android-application-id.sh 2> /dev/null)"
+    assert_contains 'pas de projet Android : avertissement' "${warning_title}" "$(read-android-application-id.sh 2>&1 > /dev/null)"
+}
+
 test_node_project_detection() {
     echo 'detect-project.sh : Node.js'
 
@@ -250,13 +319,165 @@ test_database_project_detection() {
 
     move_into_new_project
     assert_fails '-database sans Dockerfile refusé' detect-project.sh 'econoris-database'
+
+    move_into_new_project Dockerfile DEBIAN/control
+    assert_equals '-database prioritaire sur DEBIAN/control' "$(expected_project database migrations true true)" "$(detect-project.sh 'econoris-database')"
+}
+
+test_debian_project_detection() {
+    echo 'detect-project.sh : paquet Debian'
+
+    move_into_new_project DEBIAN/control
+    assert_equals 'DEBIAN/control : paquet' "$(expected_project debian package false true)" "$(detect-project.sh 'apt-auto-update')"
+    assert_equals 'DEBIAN/control, suffixe ignoré' "$(expected_project debian package false true)" "$(detect-project.sh 'apt-auto-update-app')"
+
+    move_into_new_project DEBIAN/control package.json Dockerfile
+    assert_equals 'DEBIAN/control prioritaire sur package.json' "$(expected_project debian package true true)" "$(detect-project.sh 'apt-auto-update')"
+
+    move_into_new_project DEBIAN/postinst
+    assert_fails 'dossier DEBIAN sans control refusé' detect-project.sh 'apt-auto-update'
+    assert_contains 'dossier DEBIAN sans control : message' 'DEBIAN/control manquant' "$(detect-project.sh 'apt-auto-update' 2>&1)"
+
+    move_into_new_project debian/control
+    assert_fails 'paquet source debian/control refusé' detect-project.sh 'apt-auto-update'
+    assert_contains 'paquet source debian/control : message' 'Paquet source Debian' "$(detect-project.sh 'apt-auto-update' 2>&1)"
+}
+
+# Writes the tree of a Debian package in the current directory, next to files that must
+# stay out of the package. The maintainer script is not executable, as after a checkout
+# that lost the bit.
+write_debian_package_tree() {
+    local architecture="${1:-all}"
+
+    mkdir -p DEBIAN usr/bin etc/demo .github
+    printf 'Package: demo\nVersion: 1.4.0\nArchitecture: %s\nMaintainer: Test <test@example.com>\nDescription: Demo\n\n' "${architecture}" > DEBIAN/control
+    printf '#!/bin/sh\nset -e\n' > DEBIAN/postinst
+    printf '#!/bin/sh\necho demo\n' > usr/bin/demo
+    chmod +x usr/bin/demo
+    echo 'key=value' > etc/demo/demo.conf
+    touch README.md .github/ci.yml
+}
+
+# Prints one file of the control archive of a .deb file, for example "./conffiles".
+read_control_archive_file() {
+    local package_file="$1"
+    local member_name="$2"
+
+    dpkg-deb --ctrl-tarfile "${package_file}" | tar --extract --to-stdout "${member_name}"
+}
+
+# Prints the "ls -l" line of one installed file of a .deb file.
+describe_package_member() {
+    local package_file="$1"
+    local member_path="$2"
+
+    dpkg-deb --contents "${package_file}" | grep " ${member_path}"
+}
+
+test_debian_package_build() {
+    echo 'stage-debian-package.sh, build-debian-package.sh'
+
+    move_into_new_project
+    write_debian_package_tree
+    local package_directory="${PWD}.package"
+    local package_file="${PWD}.deb"
+
+    stage-debian-package.sh "${package_directory}"
+    assert_equals 'seuls DEBIAN/ et les dossiers installés copiés' 'DEBIAN etc usr' "$(find "${package_directory}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | paste --serial --delimiters=' ')"
+
+    build-debian-package.sh "${package_directory}" "${package_file}" '1.5.0-rc.2' > /dev/null
+    assert_equals 'release candidate : X.Y.Z~rc.N' '1.5.0~rc.2' "$(dpkg-deb --field "${package_file}" Version)"
+    assert_contains 'Installed-Size calculé' 'Installed-Size:' "$(dpkg-deb --info "${package_file}")"
+    assert_equals 'conffiles : fichiers de etc/' '/etc/demo/demo.conf' "$(read_control_archive_file "${package_file}" ./conffiles)"
+    assert_contains 'md5sums : fichiers installés' 'usr/bin/demo' "$(read_control_archive_file "${package_file}" ./md5sums)"
+    assert_contains 'script postinst rendu exécutable' '-rwxr-xr-x' "$(dpkg-deb --ctrl-tarfile "${package_file}" | tar --list --verbose ./postinst)"
+    assert_contains 'exécutable conservé, appartient à root' '-rwxr-xr-x root/root' "$(describe_package_member "${package_file}" ./usr/bin/demo)"
+    assert_contains 'fichier non exécutable conservé' '-rw-r--r-- root/root' "$(describe_package_member "${package_file}" ./etc/demo/demo.conf)"
+
+    rm -rf "${package_directory}"
+    printf '/etc/demo/demo.conf\n' > DEBIAN/conffiles
+    stage-debian-package.sh "${package_directory}"
+    build-debian-package.sh "${package_directory}" "${package_file}" > /dev/null
+    assert_equals 'sans version : celle de DEBIAN/control' '1.4.0' "$(dpkg-deb --field "${package_file}" Version)"
+    assert_equals 'conffiles déjà listé : pas de doublon' '/etc/demo/demo.conf' "$(read_control_archive_file "${package_file}" ./conffiles)"
+
+    rm -rf "${package_directory}"
+    sed --in-place '/^Maintainer:/d; /^Description:/d' DEBIAN/control
+    stage-debian-package.sh "${package_directory}"
+    assert_contains 'champs manquants nommés' 'Maintainer Description' "$(build-debian-package.sh "${package_directory}" "${package_file}" 2>&1)"
+
+    rm -rf "${package_directory}"
+    mkdir bin
+    assert_fails 'dossier bin/ refusé' stage-debian-package.sh "${package_directory}"
+
+    mv bin lib
+    touch pubspec.yaml
+    assert_succeeds 'projet Flutter : lib/ des sources Dart accepté' stage-debian-package.sh "${package_directory}"
+    assert_succeeds 'projet Flutter : lib/ hors du paquet' test ! -e "${package_directory}/lib"
+
+    move_into_new_project README.md
+    assert_fails 'sans DEBIAN/control refusé' stage-debian-package.sh "${PWD}.package"
+}
+
+# Writes a Linux bundle of a Flutter application, as "flutter build linux" does.
+write_flutter_bundle() {
+    local bundle_directory="$1"
+
+    mkdir -p "${bundle_directory}/lib" "${bundle_directory}/data"
+    printf '#!/bin/sh\n' > "${bundle_directory}/demo_app"
+    chmod +x "${bundle_directory}/demo_app"
+    touch "${bundle_directory}/lib/libapp.so" "${bundle_directory}/data/icudtl.dat"
+}
+
+test_flutter_bundle_in_debian_package() {
+    echo 'add-flutter-bundle-to-debian-package.sh'
+
+    move_into_new_project
+    write_debian_package_tree "$(dpkg --print-architecture)"
+    rm usr/bin/demo
+    mkdir -p usr/share/applications
+    printf '[Desktop Entry]\nType=Application\nName=Demo\nExec=demo\n' > usr/share/applications/demo.desktop
+    write_flutter_bundle bundle
+    local package_directory="${PWD}.package"
+    local package_file="${PWD}.deb"
+
+    stage-debian-package.sh "${package_directory}"
+    add-flutter-bundle-to-debian-package.sh "${package_directory}" bundle
+    assert_succeeds 'bundle dans /opt/<paquet>' test -f "${package_directory}/opt/demo/lib/libapp.so"
+    assert_equals 'commande /usr/bin/<paquet>' '/opt/demo/demo_app' "$(readlink "${package_directory}/usr/bin/demo")"
+    assert_fails 'opt/<paquet> déjà présent refusé' add-flutter-bundle-to-debian-package.sh "${package_directory}" bundle
+
+    build-debian-package.sh "${package_directory}" "${package_file}" > /dev/null
+    assert_contains 'lien dans le paquet' './usr/bin/demo -> /opt/demo/demo_app' "$(describe_package_member "${package_file}" ./usr/bin/demo)"
+
+    rm -rf "${package_directory}"
+    stage-debian-package.sh "${package_directory}"
+    touch bundle/second_app
+    chmod +x bundle/second_app
+    assert_fails 'deux exécutables refusés' add-flutter-bundle-to-debian-package.sh "${package_directory}" bundle
+    rm bundle/second_app
+
+    assert_fails 'bundle absent refusé' add-flutter-bundle-to-debian-package.sh "${package_directory}" missing-bundle
+
+    sed --in-place 's/^Architecture:.*/Architecture: s390x/' "${package_directory}/DEBIAN/control"
+    assert_contains 'autre architecture refusée' 'Architecture incorrecte' "$(add-flutter-bundle-to-debian-package.sh "${package_directory}" bundle 2>&1)"
+
+    rm -rf "${package_directory}"
+    touch usr/bin/demo
+    stage-debian-package.sh "${package_directory}"
+    assert_contains 'usr/bin/<paquet> du dépôt refusé' 'usr/bin/demo refusé' "$(add-flutter-bundle-to-debian-package.sh "${package_directory}" bundle 2>&1)"
+    rm usr/bin/demo
+
+    rm -rf "${package_directory}" usr/share/applications
+    stage-debian-package.sh "${package_directory}"
+    assert_contains 'sans .desktop refusé' 'Fichier .desktop manquant' "$(add-flutter-bundle-to-debian-package.sh "${package_directory}" bundle 2>&1)"
 }
 
 test_unknown_project_detection() {
     echo 'detect-project.sh : autres projets'
 
     move_into_new_project Dockerfile
-    assert_fails 'ni pubspec.yaml ni package.json refusé' detect-project.sh 'floraccess-app'
+    assert_fails 'ni pubspec.yaml, ni package.json, ni DEBIAN/control refusé' detect-project.sh 'floraccess-app'
 }
 
 test_pull_request_branches() {
@@ -401,14 +622,17 @@ test_plan_release() {
     assert_fails 'push hors de main refusé' env EVENT_NAME=push BRANCH_NAME=dev plan-release.sh
 }
 
-# Writes a Node.js project (package.json and its lockfile) and a Flutter one (pubspec.yaml)
-# at the given version, in the current directory.
+# Writes a Node.js project (package.json and its lockfile), a Flutter one (pubspec.yaml) and
+# a Debian package (DEBIAN/control) at the given version, in the current directory.
 write_project_files() {
     local version="$1"
 
+    mkdir -p DEBIAN
+    printf 'Package: demo\nVersion: %s\nArchitecture: all\nMaintainer: Test <test@example.com>\nDescription: Demo\n' "${version}" > DEBIAN/control
+
     printf '{\n    "name": "demo",\n    "version": "%s"\n}\n' "${version}" > package.json
     printf '{\n  "name": "demo",\n  "version": "%s",\n  "lockfileVersion": 3,\n  "packages": {\n    "": { "name": "demo", "version": "%s" }\n  }\n}\n' "${version}" "${version}" > package-lock.json
-    printf 'name: demo\nversion: %s+7 # build number kept\n\nenvironment:\n  sdk: ^3.0.0\n' "${version}" > pubspec.yaml
+    printf 'name: demo\nversion: %s+%s # build number\n\nenvironment:\n  sdk: ^3.0.0\n' "${version}" "$(compute-android-version-code.sh "${version}")" > pubspec.yaml
 }
 
 test_write_version_files() {
@@ -421,11 +645,28 @@ test_write_version_files() {
     assert_equals 'indentation de package.json conservée' '    "version": "1.5.0"' "$(grep '"version"' package.json)"
     assert_equals 'package-lock.json' '1.5.0' "$(jq --raw-output '.version' package-lock.json)"
     assert_equals 'package-lock.json, packages[""]' '1.5.0' "$(jq --raw-output '.packages[""].version' package-lock.json)"
-    assert_equals 'pubspec.yaml, build number conservé' 'version: 1.5.0+7' "$(grep '^version:' pubspec.yaml)"
+    assert_equals 'pubspec.yaml, versionCode en build number' 'version: 1.5.0+1005000' "$(grep '^version:' pubspec.yaml)"
+
+    printf 'name: demo\nversion: 1.4.0+12\n' > pubspec.yaml
+    write-version-files.sh '1.5.0'
+    assert_equals 'pubspec.yaml, ancien build number remplacé' 'version: 1.5.0+1005000' "$(grep '^version:' pubspec.yaml)"
 
     printf 'name: demo\n' > pubspec.yaml
     write-version-files.sh '1.5.0'
-    assert_equals 'pubspec.yaml sans version : ligne ajoutée' 'version: 1.5.0' "$(grep '^version:' pubspec.yaml)"
+    assert_equals 'pubspec.yaml sans version : ligne ajoutée' 'version: 1.5.0+1005000' "$(grep '^version:' pubspec.yaml)"
+
+    assert_equals 'DEBIAN/control' 'Version: 1.5.0' "$(grep '^Version:' DEBIAN/control)"
+    assert_equals 'DEBIAN/control, autres champs conservés' 'Package: demo' "$(head -n 1 DEBIAN/control)"
+
+    printf 'Package: demo\nArchitecture: all\n' > DEBIAN/control
+    write-version-files.sh '1.5.0'
+    assert_equals 'DEBIAN/control sans version : champ ajouté après Package' "$(printf 'Package: demo\nVersion: 1.5.0\nArchitecture: all')" "$(cat DEBIAN/control)"
+
+    printf 'package: demo\nversion: 1.4.0\n' > DEBIAN/control
+    write-version-files.sh '1.5.0'
+    assert_equals 'DEBIAN/control, champ en minuscules remplacé' "$(printf 'package: demo\nVersion: 1.5.0')" "$(cat DEBIAN/control)"
+
+    assert_fails 'version sans versionCode possible refusée' write-version-files.sh '1.1000.0'
 
     move_into_new_project Dockerfile
     assert_succeeds 'aucun fichier de version : rien à faire' write-version-files.sh '1.5.0'
@@ -440,13 +681,25 @@ test_check_version_files() {
     commit 'chore: add the version files'
     assert_succeeds 'fichiers à jour acceptés' check-version-files.sh '1.5.0'
     assert_fails 'fichiers en retard refusés' check-version-files.sh '1.6.0'
+    assert_contains 'ligne attendue du pubspec.yaml dans le message' '« version: 1.6.0+1006000 »' "$(check-version-files.sh '1.6.0' 2>&1)"
+
+    sed --in-place 's/^version:.*/version: 1.5.0+7/' pubspec.yaml
+    git commit --quiet --all --message 'chore: build number left behind'
+    assert_fails 'build number autre que le versionCode refusé' check-version-files.sh '1.5.0'
+    git revert --no-edit HEAD > /dev/null
+
+    sed --in-place 's/^Version:.*/Version: 1.4.0/' DEBIAN/control
+    git commit --quiet --all --message 'chore: control file left behind'
+    assert_fails 'DEBIAN/control en retard refusé' check-version-files.sh '1.5.0'
+    assert_contains 'DEBIAN/control en retard : fichier nommé' 'DEBIAN/control : 1.4.0' "$(check-version-files.sh '1.5.0' 2>&1)"
+    git revert --no-edit HEAD > /dev/null
 
     jq '.packages[""].version = "1.4.0"' package-lock.json > package-lock.tmp && mv package-lock.tmp package-lock.json
     git commit --quiet --all --message 'chore: lockfile left behind'
     assert_fails 'packages[""] en retard refusé' check-version-files.sh '1.5.0'
     assert_succeeds 'lecture depuis une référence git' check-version-files.sh '1.5.0' HEAD~1
 
-    git rm --quiet package.json package-lock.json pubspec.yaml
+    git rm --quiet package.json package-lock.json pubspec.yaml DEBIAN/control
     commit 'chore: remove the version files'
     assert_succeeds 'aucun fichier de version : accepté' check-version-files.sh '1.5.0'
 }
@@ -494,8 +747,14 @@ test_commit_version_files() {
 test_image_name
 test_flutter_project_detection
 test_flutter_version_resolution
+test_android_version_code
+test_android_application_id
+test_flutter_build_options
 test_node_project_detection
 test_database_project_detection
+test_debian_project_detection
+test_debian_package_build
+test_flutter_bundle_in_debian_package
 test_unknown_project_detection
 test_pull_request_branches
 test_commit_messages

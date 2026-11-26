@@ -13,19 +13,30 @@ name: Flutter
 #                   attached to the release
 #                   Android, with the signing secrets: signed APK and AAB attached to the
 #                   release, then the AAB sent to Google Play (final version only)
+#                   Debian package, when there is a DEBIAN/control: .deb attached to the release
 #   Library      →  git tag and GitHub Release, then pub.dev (final version only)
+#
+# The Debian package holds the Linux version of the application, built in a container of
+# the "debian-image" input so that it installs on that system and the newer ones. It is
+# then installed and removed in a clean container of the same image (debian/README.md).
+#
+# The Android release is built like F-Droid's build server rebuilds it, so that F-Droid can
+# publish the signed APK of the GitHub Release itself: F-Droid follows the tags on its own,
+# nothing is uploaded to it. F_DROID_ENABLE=true requires the release key and checks that
+# F-Droid rebuilds the same APK (flutter/README.md → F-Droid).
 #
 # The quality job ends by building an application the way its release does, without
 # publishing anything, so a broken build is seen in the pull request rather than at
 # release time: the Android APK (debug build, no signing needed) when "android" is on,
-# and the Docker image when "docker-image" is on and there is a Dockerfile. A library
-# has nothing to build: "flutter analyze" already compiles all its code.
+# the Docker image when "docker-image" is on and there is a Dockerfile, and the Debian
+# package when "debian" is on and there is a DEBIAN/control. A library has nothing to
+# build: "flutter analyze" already compiles all its code.
 #
 # Google Play and pub.dev come after the GitHub Release, like the stores of extension.yml:
 # a refused version leaves the tag and the back-merge untouched, and each one is skipped
 # while its secret is missing.
 #
-# Only the quality, Android, Google Play and pub.dev jobs are specific to Flutter: every
+# Only the quality, Android, Debian, Google Play and pub.dev jobs are specific to Flutter: every
 # gitflow step comes from the gitflow-*.yml workflows. See flutter/README.md for the
 # project requirements.
 #
@@ -37,7 +48,10 @@ name: Flutter
 #
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
 #   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD               →  signed Android build
-#   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON                      →  Google Play
+#   F_DROID_ENABLE ("true" or "false")                    →  F-Droid: release key required,
+#                                                            and the APK checked as F-Droid
+#                                                            rebuilds it
+#   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON                      →  Google Play: release key required
 #   PUB_DEV_SERVICE_ACCOUNT_JSON                          →  pub.dev
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN                   →  Docker Hub, and the login to dhi.io
 #                                                            required by a Dockerfile based on
@@ -62,6 +76,19 @@ on:
         description: Google Play track receiving a final version, for example "production", "beta", "alpha" or "internal".
         type: string
         default: production
+      debian:
+        description: Builds the Debian package of an application that has a DEBIAN/control file, and attaches it to the release.
+        type: boolean
+        default: true
+      debian-image:
+        description: Docker image the Linux application is built and its Debian package tested in, for example "debian:12" or "ubuntu:24.04". Pick the oldest system the package must install on.
+        type: string
+        default: 'debian:12'
+
+# The Linux build of the CI targets the amd64 architecture only: "flutter build linux"
+# builds for the machine it runs on, a GitHub runner.
+env:
+  LINUX_BUNDLE_DIRECTORY: build/linux/x64/release/bundle
 
 # One run at a time per branch: two clicks on the button, or two merges on main, wait
 # for each other. A pull request only keeps its latest run.
@@ -198,6 +225,34 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Built on the runner, only to see a broken build or a broken package in the pull
+      # request. The release builds in the container of "debian-image", then installs the
+      # package in a clean one: built here, against the newer libraries of the runner, the
+      # application could not be tested there.
+      - name: Install the Linux build tools
+        if: >-
+          inputs.debian
+          && steps.project.outputs.kind == 'application'
+          && steps.project.outputs.has-debian-control == 'true'
+        run: |
+          sudo apt-get update --quiet=2
+          sudo apt-get install --yes --quiet=2 --no-install-recommends ninja-build libgtk-3-dev lintian desktop-file-utils > /dev/null
+
+      - name: Build the Debian package
+        if: >-
+          inputs.debian
+          && steps.project.outputs.kind == 'application'
+          && steps.project.outputs.has-debian-control == 'true'
+        run: |
+          flutter build linux --release
+
+          package_directory="${RUNNER_TEMP}/debian-package"
+          package_file='build/debian/package.deb'
+          stage-debian-package.sh "${package_directory}"
+          add-flutter-bundle-to-debian-package.sh "${package_directory}" "${LINUX_BUNDLE_DIRECTORY}"
+          build-debian-package.sh "${package_directory}" "${package_file}"
+          check-debian-package.sh "${package_file}" >> "${GITHUB_STEP_SUMMARY}"
+
   #=========#
   # Release #
   #=========#
@@ -227,31 +282,103 @@ jobs:
       image-tag: ${{ needs.prepare-release.outputs.version }}
       tag-latest: ${{ needs.prepare-release.outputs.kind == 'final' }}
 
+  # Built in the container of F-Droid's build server, in the folder where F-Droid builds the
+  # application: F-Droid rebuilds each version from its tag, and publishes the APK of the
+  # GitHub Release only when both are identical, the signature apart. A Flutter build
+  # depends on its folder (written in libapp.so) and on its Java version.
   android:
     name: Android
     if: inputs.android && needs.prepare-release.outputs.project-kind == 'application'
     needs: prepare-release
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Nothing is cached, like on F-Droid's build server: Flutter, the NDK and the Gradle
+    # dependencies are downloaded at every release.
+    timeout-minutes: 45
+
+    # The moving tag, on purpose: F-Droid builds with its current image, and GitLab deletes
+    # the old digests of the tag. A pinned digest would drift away from F-Droid, then stop
+    # resolving.
+    container:
+      image: registry.gitlab.com/fdroid/fdroidserver:buildserver-trixie
 
     outputs:
-      signed: ${{ steps.signing.outputs.signed }}
+      signed: ${{ steps.publications.outputs.signed }}
 
     env:
+      KIND: ${{ needs.prepare-release.outputs.kind }}
       VERSION: ${{ needs.prepare-release.outputs.version }}
       RELEASE_FILE_NAME: ${{ needs.prepare-release.outputs.project-name }}-${{ needs.prepare-release.outputs.tag }}
+      # Folder of F-Droid's build server that holds the Flutter SDK and the applications.
+      FDROID_BUILD_ROOT: /home/vagrant/build
 
     steps:
+      # The secrets tell where the application goes, before anything is downloaded:
+      #
+      #   no store             →  GitHub Release, signed with the release key when it exists,
+      #                            with the debug key otherwise
+      #   F_DROID_ENABLE=true  →  GitHub Release, which F-Droid publishes: release key required
+      #   Google Play secret   →  GitHub Release, then Google Play: release key required
+      #
+      # A store without the release key stops the run here: nothing is published.
+      - name: Plan the Android publications
+        id: publications
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          F_DROID_ENABLE: ${{ secrets.F_DROID_ENABLE }}
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          readonly SIGNING_SECRETS='ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS et ANDROID_KEY_PASSWORD'
+
+          signed=false
+          if [ -n "${ANDROID_KEYSTORE_BASE64}${ANDROID_KEYSTORE_PASSWORD}${ANDROID_KEY_ALIAS}${ANDROID_KEY_PASSWORD}" ]; then
+            signed=true
+          fi
+
+          if [ "${signed}" = 'true' ] && { [ -z "${ANDROID_KEYSTORE_BASE64}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD}" ] || [ -z "${ANDROID_KEY_ALIAS}" ] || [ -z "${ANDROID_KEY_PASSWORD}" ]; }; then
+            echo "::error title=Signature Android incomplète::Les secrets ${SIGNING_SECRETS} vont ensemble : définissez-les tous, ou aucun."
+            exit 1
+          fi
+
+          case "${F_DROID_ENABLE}" in
+            true) fdroid=true ;;
+            '' | false) fdroid=false ;;
+            *)
+              echo "::error title=F_DROID_ENABLE invalide::Le secret F_DROID_ENABLE vaut « ${F_DROID_ENABLE} » : il doit valoir true ou false."
+              exit 1
+              ;;
+          esac
+
+          google_play=false
+          if [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON}" ]; then
+            google_play=true
+          fi
+
+          if [ "${fdroid}" = 'true' ] && [ "${signed}" != 'true' ]; then
+            echo "::error title=Clé de signature manquante pour F-Droid::Le secret F_DROID_ENABLE vaut true, mais la clé de signature manque : F-Droid refuse un APK signé avec la clé de debug. Définissez les secrets ${SIGNING_SECRETS}, ou passez F_DROID_ENABLE à false."
+            exit 1
+          fi
+
+          if [ "${google_play}" = 'true' ] && [ "${signed}" != 'true' ]; then
+            echo "::error title=Clé de signature manquante pour Google Play::Le secret GOOGLE_PLAY_SERVICE_ACCOUNT_JSON existe, mais la clé de signature manque : Google Play refuse un AAB signé avec la clé de debug. Définissez les secrets ${SIGNING_SECRETS}, ou supprimez GOOGLE_PLAY_SERVICE_ACCOUNT_JSON."
+            exit 1
+          fi
+
+          if [ "${signed}" != 'true' ]; then
+            echo "::notice title=Android non signé::Aucune clé de signature ni aucun store : l'APK attaché à la release est signé avec la clé de debug."
+          fi
+
+          {
+            echo "signed=${signed}"
+            echo "fdroid=${fdroid}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Checkout the project
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Set up Java
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          distribution: temurin
-          java-version: '17'
 
       - name: Load the gitflow scripts
         uses: FloRobart/github-ci/gitflow/scripts@main
@@ -262,57 +389,91 @@ jobs:
           REQUESTED_FLUTTER_VERSION: ${{ inputs.flutter-version }}
         run: resolve-flutter-version.sh "${REQUESTED_FLUTTER_VERSION}" >> "${GITHUB_OUTPUT}"
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          channel: stable
-          flutter-version: ${{ steps.flutter-version.outputs.version }}
-          cache: true
+      # F-Droid builds an application in <build root>/<applicationId>, with its pub cache
+      # inside. The image declares its Android SDK in /etc/profile.d/bsenv.sh, which only a
+      # login shell reads: the next steps get it from here.
+      - name: Prepare the F-Droid build folder
+        env:
+          FDROID: ${{ steps.publications.outputs.fdroid }}
+        run: |
+          build_directory="${GITHUB_WORKSPACE}"
+          application_id=$(read-android-application-id.sh)
 
-      # Writes the files read by android/app/build.gradle, as described in the Flutter
-      # documentation ("Sign the app"). Without the secrets, Flutter signs the release
-      # with the debug key: the APK installs, but Google Play refuses it.
+          if [ "${FDROID}" = 'true' ] && [ -z "${application_id}" ]; then
+            echo "::error title=applicationId introuvable pour F-Droid::F_DROID_ENABLE vaut true, mais l'applicationId n'est pas écrit une seule fois en toutes lettres dans android/app/build.gradle(.kts) : impossible de construire dans le dossier de F-Droid."
+            exit 1
+          fi
+
+          if [ -n "${application_id}" ]; then
+            build_directory="${FDROID_BUILD_ROOT}/${application_id}"
+            mkdir -p "${build_directory}"
+            cp -a . "${build_directory}/"
+          fi
+
+          source /etc/profile.d/bsenv.sh
+
+          {
+            echo "BUILD_DIRECTORY=${build_directory}"
+            echo "PUB_CACHE=${build_directory}/.pub-cache"
+            echo "ANDROID_HOME=${ANDROID_HOME}"
+          } >> "${GITHUB_ENV}"
+
+      # Cloned where F-Droid puts its Flutter source library, at the same version.
+      - name: Set up Flutter
+        env:
+          FLUTTER_VERSION: ${{ steps.flutter-version.outputs.version }}
+        run: |
+          flutter_directory="${FDROID_BUILD_ROOT}/srclib/flutter"
+          git clone --quiet --depth 1 --branch "${FLUTTER_VERSION:-stable}" https://github.com/flutter/flutter.git "${flutter_directory}"
+          echo "${flutter_directory}/bin" >> "${GITHUB_PATH}"
+
+          "${flutter_directory}/bin/flutter" config --no-analytics
+          "${flutter_directory}/bin/flutter" --version
+
+      # A final version is built exactly as F-Droid rebuilds its tag, from the committed
+      # pubspec.yaml; a release candidate gets its version as options. With a pinned
+      # Flutter, the lockfile is enforced, as in F-Droid's recipe. The options are shared
+      # by the build and by the F-Droid check.
+      - name: Choose the build options
+        env:
+          FLUTTER_VERSION: ${{ steps.flutter-version.outputs.version }}
+        run: choose-flutter-build-options.sh "${KIND}" "${VERSION}" "${FLUTTER_VERSION}" >> "${GITHUB_ENV}"
+
+      # Writes the files read by android/app/build.gradle(.kts), as described in the Flutter
+      # documentation ("Sign the app"). Without them, Flutter signs the release with the
+      # debug key: the APK installs, but neither Google Play nor F-Droid accept it.
       - name: Configure the Android signing
-        id: signing
+        if: steps.publications.outputs.signed == 'true'
+        working-directory: ${{ env.BUILD_DIRECTORY }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -z "${ANDROID_KEYSTORE_BASE64}${ANDROID_KEYSTORE_PASSWORD}${ANDROID_KEY_ALIAS}${ANDROID_KEY_PASSWORD}" ]; then
-            echo "::notice title=Android non signé::Les secrets ANDROID_* n'existent pas : seul l'APK, signé avec la clé de debug, est attaché à la release. Rien n'est envoyé sur Google Play."
-            echo 'signed=false' >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          if [ -z "${ANDROID_KEYSTORE_BASE64}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD}" ] || [ -z "${ANDROID_KEY_ALIAS}" ] || [ -z "${ANDROID_KEY_PASSWORD}" ]; then
-            echo "::error title=Signature Android incomplète::Les secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS et ANDROID_KEY_PASSWORD vont ensemble : définissez-les tous, ou aucun."
-            exit 1
-          fi
-
-          echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > android/app/upload-keystore.jks
+          echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > android/app/release-keystore.jks
 
           cat > android/key.properties <<END_OF_PROPERTIES
-          storeFile=upload-keystore.jks
+          storeFile=release-keystore.jks
           storePassword=${ANDROID_KEYSTORE_PASSWORD}
           keyAlias=${ANDROID_KEY_ALIAS}
           keyPassword=${ANDROID_KEY_PASSWORD}
           END_OF_PROPERTIES
 
-          echo 'signed=true' >> "${GITHUB_OUTPUT}"
-
-      # The build name keeps only "X.Y.Z": stores refuse "-rc.N". The build number must
-      # grow with every build sent to Google Play: the run number of the workflow does.
       - name: Build the release files
+        working-directory: ${{ env.BUILD_DIRECTORY }}
         env:
-          SIGNED: ${{ steps.signing.outputs.signed }}
+          SIGNED: ${{ steps.publications.outputs.signed }}
         run: |
-          build_options=(--release --build-name="${VERSION%%-*}" --build-number="${GITHUB_RUN_NUMBER}")
-          mkdir release-assets
+          read -r -a build_options <<< "${BUILD_OPTIONS}"
+          read -r -a pub_get_options <<< "${PUB_GET_OPTIONS}"
+          flutter pub get "${pub_get_options[@]}"
+
+          release_assets_directory="${GITHUB_WORKSPACE}/release-assets"
+          mkdir "${release_assets_directory}"
 
           flutter build apk "${build_options[@]}"
-          cp build/app/outputs/flutter-apk/app-release.apk "release-assets/${RELEASE_FILE_NAME}.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "${release_assets_directory}/${RELEASE_FILE_NAME}.apk"
 
           # The AAB only serves Google Play, which refuses one signed with the debug key.
           if [ "${SIGNED}" != 'true' ]; then
@@ -320,24 +481,150 @@ jobs:
           fi
 
           flutter build appbundle "${build_options[@]}"
-          cp build/app/outputs/bundle/release/app-release.aab "release-assets/${RELEASE_FILE_NAME}.aab"
+          cp build/app/outputs/bundle/release/app-release.aab "${release_assets_directory}/${RELEASE_FILE_NAME}.aab"
+
+      # The SHA-256 of the signing certificate is the value of AllowedAPKSigningKeys in the
+      # F-Droid metadata. An APK still signed with the debug key despite the secrets means
+      # that the Gradle file does not read android/key.properties.
+      - name: Check the signature
+        if: steps.publications.outputs.signed == 'true'
+        run: |
+          certificates=$(apksigner verify --print-certs "release-assets/${RELEASE_FILE_NAME}.apk")
+
+          if grep --quiet 'certificate DN: .*CN=Android Debug' <<< "${certificates}"; then
+            echo "::error title=APK signé avec la clé de debug::Les secrets de signature existent, mais android/app/build.gradle(.kts) ne lit pas android/key.properties : voir flutter/README.md → Signature."
+            exit 1
+          fi
+
+          certificate_digest=$(sed --quiet 's/^Signer #1 certificate SHA-256 digest: //p' <<< "${certificates}")
+
+          {
+            echo '### 🔏 Signature Android'
+            echo
+            echo "Empreinte SHA-256 du certificat, la valeur de \`AllowedAPKSigningKeys\` pour F-Droid : \`${certificate_digest}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # Rebuilds the application as F-Droid will, from a fresh copy and without the release
+      # key, then copies the signature of the release APK onto it, as "fdroid publish" does
+      # (apksigcopier). A failure means that F-Droid would refuse this version: nothing is
+      # published, rather than a GitHub Release missing from F-Droid.
+      - name: Check that F-Droid rebuilds the same APK
+        if: steps.publications.outputs.fdroid == 'true'
+        run: |
+          apt-get update --quiet=2
+          apt-get install --yes --quiet=2 apksigcopier > /dev/null
+
+          rm -rf "${BUILD_DIRECTORY}"
+          mkdir -p "${BUILD_DIRECTORY}"
+          tar --create --exclude=./release-assets --file=- . | tar --extract --file=- --directory="${BUILD_DIRECTORY}"
+
+          read -r -a build_options <<< "${BUILD_OPTIONS}"
+          read -r -a pub_get_options <<< "${PUB_GET_OPTIONS}"
+          (
+            cd "${BUILD_DIRECTORY}"
+            flutter pub get "${pub_get_options[@]}"
+            flutter build apk "${build_options[@]}"
+          )
+
+          if ! apksigcopier compare "release-assets/${RELEASE_FILE_NAME}.apk" "${BUILD_DIRECTORY}/build/app/outputs/flutter-apk/app-release.apk"; then
+            echo "::error title=APK non reproductible::F-Droid ne reconstruirait pas le même APK : il refuserait cette version. Voir flutter/README.md → Environnement de build."
+            exit 1
+          fi
+
+          {
+            echo '### 🤖 F-Droid'
+            echo
+            echo "APK reproductible : F-Droid publiera \`${RELEASE_FILE_NAME}.apk\` après son prochain passage, si l'application y est inscrite."
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       # Picked up by gitflow-publish-release.yml and attached to the release, then by the
       # Google Play job.
       - name: Upload the release files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-assets
+          name: release-assets-android
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The Linux application is built in a container of "debian-image", against the libraries
+  # of the oldest system the package targets. The package is then installed and removed in
+  # a clean container of the same image: a library missing from Depends stops the release.
+  debian:
+    name: Debian package
+    if: >-
+      inputs.debian
+      && needs.prepare-release.outputs.project-kind == 'application'
+      && needs.prepare-release.outputs.has-debian-control == 'true'
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    # Nothing is cached in the build container: Flutter and the dependencies are
+    # downloaded at every release.
+    timeout-minutes: 45
+
+    env:
+      KIND: ${{ needs.prepare-release.outputs.kind }}
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+      DEBIAN_IMAGE: ${{ inputs.debian-image }}
+      PACKAGE_FILE: release-assets/${{ needs.prepare-release.outputs.project-name }}-${{ needs.prepare-release.outputs.tag }}.deb
+
+    steps:
+      - name: Checkout the project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load the gitflow scripts
+        uses: FloRobart/github-ci/gitflow/scripts@main
+
+      - name: Resolve the Flutter version
+        id: flutter-version
+        env:
+          REQUESTED_FLUTTER_VERSION: ${{ inputs.flutter-version }}
+        run: resolve-flutter-version.sh "${REQUESTED_FLUTTER_VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Choose the build options
+        env:
+          FLUTTER_VERSION: ${{ steps.flutter-version.outputs.version }}
+        run: choose-flutter-build-options.sh "${KIND}" "${VERSION}" "${FLUTTER_VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Build the Linux application
+        env:
+          FLUTTER_VERSION: ${{ steps.flutter-version.outputs.version }}
+        run: run-in-docker-image.sh "${DEBIAN_IMAGE}" build-flutter-linux-bundle.sh "${FLUTTER_VERSION}" "${PUB_GET_OPTIONS}" "${BUILD_OPTIONS}"
+
+      - name: Build the Debian package
+        run: |
+          package_directory="${RUNNER_TEMP}/debian-package"
+          stage-debian-package.sh "${package_directory}"
+          add-flutter-bundle-to-debian-package.sh "${package_directory}" "${LINUX_BUNDLE_DIRECTORY}"
+          build-debian-package.sh "${package_directory}" "${PACKAGE_FILE}" "${VERSION}"
+
+      - name: Install and remove the package
+        run: run-in-docker-image.sh "${DEBIAN_IMAGE}" install-and-remove-debian-package.sh "${PACKAGE_FILE}"
+
+      - name: Check the package
+        run: |
+          sudo apt-get update --quiet=2
+          sudo apt-get install --yes --quiet=2 --no-install-recommends lintian desktop-file-utils > /dev/null
+          check-debian-package.sh "${PACKAGE_FILE}" >> "${GITHUB_STEP_SUMMARY}"
+
+      # Picked up by gitflow-publish-release.yml and attached to the release.
+      - name: Upload the release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets-debian
           path: release-assets/
           if-no-files-found: error
           retention-days: 7
 
   publish-release:
     name: Publish release
-    # The Docker image and the Android build can each be skipped (turned off, mobile
-    # application, library): a skipped job is fine, a failed one stops the release.
+    # The Docker image, the Android build and the Debian package can each be skipped
+    # (turned off, mobile application, library): a skipped job is fine, a failed one stops
+    # the release.
     if: ${{ !failure() && !cancelled() && needs.prepare-release.result == 'success' }}
-    needs: [prepare-release, docker-image, android]
+    needs: [prepare-release, docker-image, android, debian]
     uses: FloRobart/github-ci/.github/workflows/gitflow-publish-release.yml@main
     secrets: inherit
     permissions:
@@ -349,7 +636,7 @@ jobs:
       tag: ${{ needs.prepare-release.outputs.tag }}
       previous-tag: ${{ needs.prepare-release.outputs.previous-tag }}
       new-release-branch: ${{ needs.prepare-release.outputs.new-release-branch }}
-      release-assets: ${{ needs.android.result == 'success' }}
+      release-assets: ${{ needs.android.result == 'success' || needs.debian.result == 'success' }}
 
   #========#
   # Stores #
@@ -374,21 +661,17 @@ jobs:
       RELEASE_FILE_NAME: ${{ needs.prepare-release.outputs.project-name }}-${{ needs.prepare-release.outputs.tag }}
 
     steps:
+      # The android job already stopped the run when this secret exists without the release
+      # key: an AAB is always signed here.
       - name: Check the Google Play secrets
         id: secrets
         env:
           SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-          SIGNED: ${{ needs.android.outputs.signed }}
         run: |
           if [ -z "${SERVICE_ACCOUNT_JSON}" ]; then
             echo "::notice title=Google Play ignoré::Le secret GOOGLE_PLAY_SERVICE_ACCOUNT_JSON n'existe pas : l'application n'est pas envoyée sur Google Play."
             echo 'configured=false' >> "${GITHUB_OUTPUT}"
             exit 0
-          fi
-
-          if [ "${SIGNED}" != 'true' ]; then
-            echo "::error title=Application non signée::Google Play refuse une application signée avec la clé de debug : définissez aussi les secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS et ANDROID_KEY_PASSWORD."
-            exit 1
           fi
 
           echo 'configured=true' >> "${GITHUB_OUTPUT}"
@@ -397,7 +680,7 @@ jobs:
         if: steps.secrets.outputs.configured == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-assets
+          name: release-assets-android
           path: release-assets
 
       # Read in the built APK rather than in the Gradle files, which can set the
